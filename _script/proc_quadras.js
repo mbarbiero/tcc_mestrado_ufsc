@@ -15,6 +15,7 @@ function parse_csv_file(nm_arquivo){
 
 const qpl = parse_csv_file('./DADOS/paranavai_quadras_por_logradouro.csv');
 
+
 function ret_quadras_por_logradouro(nm_logradouro){
   const quadras = qpl.find((linha)=>{
     return(linha.nm_logradouro === nm_logradouro);
@@ -26,6 +27,8 @@ function ret_quadras_por_logradouro(nm_logradouro){
   return(id_quadras);
 }
 
+/*  Retorna a intersecção das quadras de diversos logradouros
+*/
 function ret_quadras_por_logradouros(nm_logradouros){
   intersec = ret_quadras_por_logradouro(nm_logradouros[0]);
   console.log(intersec);
