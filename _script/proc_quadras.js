@@ -1,7 +1,6 @@
 const fs = require("fs");
 const { parse } = require("csv-parse/sync");
 
-
 function parse_csv_file(nm_arquivo){
   const dados = fs.readFileSync(nm_arquivo,
     { encoding: 'utf8', flag: 'r' });
