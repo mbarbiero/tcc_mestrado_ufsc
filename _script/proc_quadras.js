@@ -40,6 +40,3 @@ function ret_quadras_por_logradouros(nm_logradouros){
 
 let logradouros = ['JUSCELINO KUBITSCHEK DE OLIVEIRA','ANTONIO FELIPPE'];
 console.log(ret_quadras_por_logradouros(logradouros));
-
-
-
