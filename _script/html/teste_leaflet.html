@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Leaflet Quick Start Guide Example</title>
+  <meta charset="utf-8" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+
+<body>
+  <div id="map" style="width: 960px; height: 500px"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    var map = L.map('map').setView([0,0], 13);
+
+    dsnQuadra(L, map, 0, 0, 0.02, 'Quadra<br/>12');
+
+    // Define as dimensões das quadras
+    function defDimCaixa(topo, esq, tam){
+      let caixa = [];
+      caixa.push([topo, esq]);
+      caixa.push([topo, esq + tam]);
+      caixa.push([topo + tam, esq + tam]);
+      caixa.push([topo + tam, esq]);
+
+      return(caixa);
+  }
+
+  // Cria uma quadra e adiciona ao map
+  function dsnQuadra(visao, mapa, topo, esq, tam, rotulo){
+      const caixa = defDimCaixa(topo,esq,tam);
+      const quadra = visao.polygon(caixa).bindTooltip(rotulo, {
+        direction: 'center',
+        permanent: true
+      }).addTo(mapa);
+
+      return(quadra);
+  }
+
+  </script>
+</body>
+</html>
