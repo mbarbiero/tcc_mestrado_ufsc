@@ -31,7 +31,7 @@ function ret_quadras_por_logradouro(nm_logradouro){
 */
 function ret_quadras_por_logradouros(nm_logradouros){
   intersec = ret_quadras_por_logradouro(nm_logradouros[0]);
-  console.log(intersec);
+  // console.log(intersec);
 
   for(i=1; i<nm_logradouros.length; i++){
     let cjq = ret_quadras_por_logradouro(nm_logradouros[i])
