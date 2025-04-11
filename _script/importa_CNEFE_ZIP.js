@@ -2,6 +2,8 @@ const yauzl = require('yauzl');
 const fs = require('fs');
 const csv = require('fast-csv');
 const path = require('path');
+const mysql = require('mysql2/promise'); 
+const { Console } = require('console');
 
 const pastaTrabalho = './dados';
 const pastaProcessados = './dados/processados'
@@ -26,8 +28,9 @@ function streamCSVFromZip(zipFilePath) {
 
                     readStream
                         .pipe(csv.parse({ headers: true, delimiter: ';' }))
-                        .on('data', (data) => {
-                            console.log(data.COD_UNICO_ENDERECO);
+                        .on('data', async(data) => {
+                            const query = await RetSqlCnefe(data);
+                            await inserirPontos(query);
                             results.push(data);
                         })
                         .on('end', () => {
@@ -77,18 +80,83 @@ function leArquivosZip() {
 
         const zipFiles = files.filter(file => path.extname(file) === '.zip');
 
-        zipFiles.forEach(file => {
+        zipFiles.forEach(async (file) => {
             console.log(file);
-            ProcessaMoveArquivo(path.join(pastaTrabalho, file), pastaProcessados)
+            await ProcessaMoveArquivo(path.join(pastaTrabalho, file), pastaProcessados)
                 .then(result => console.log('Processamento completo:', result))
                 .catch(err => console.error(err))
-                .then(data => {
-                    console.log('Dados:', data)
-                })
-                .catch(err => console.error(err));
         });
     });
 }
 
+async function RetSqlCnefe(dados) {
+    var sql = `INSERT INTO cnefe (
+        COD_UNICO_ENDERECO,
+        COD_UF,
+        COD_MUNICIPIO,
+        COD_DISTRITO,
+        COD_SUBDISTRITO,
+        COD_SETOR,
+        NUM_QUADRA,
+        NUM_FACE,
+        TIPO_LOGRADOURO,
+        NOM_LOGRADOURO,
+        NUM_ENDERECO,
+        NOM_COMPLEMENTO,
+        CEP,
+        LATITUDE,
+        LONGITUDE,
+        COORD
+    ) VALUES (
+        '${dados.COD_UNICO_ENDERECO}',      -- COD_UNICO_ENDERECO
+        '${dados.COD_UF}',                  -- COD_UF
+        '${dados.COD_MUNICIPIO}',           -- COD_MUNICIPIO
+        '${dados.COD_DISTRITO}',            -- COD_DISTRITO
+        '${dados.COD_SUBDISTRITO}',         -- COD_SUBDISTRITO
+        '${dados.COD_SETOR}',               -- COD_SETOR 
+        '${dados.COD_SETOR + dados.NUM_QUADRA}',              -- NUM_QUADRA 
+        '${dados.NUM_FACE}',                -- NUM_FACE 
+        '${dados.NOM_TIPO_SEGLOGR}',         -- TIPO_LOGRADOURO 
+        '${dados.NOM_TITULO_SEGLOGR + " " + dados.NOM_SEGLOGR}',     -- NOM_LOGRADOURO 
+        '${dados.NUM_ENDERECO + dados.DSC_MODIFICADOR}',            -- NUM_ENDERECO 
+        '${dados.NOM_COMP_ELEM1 + " " + dados.VAL_COMP_ELEM1 + " " + dados.NOM_COMP_ELEM2 + " " + dados.VAL_COMP_ELEM2}',       -- NOM_COMPLEMENTO 
+        '${dados.CEP}',         -- CEP 
+        ${dados.LATITUDE},      -- LATITUDE 
+        ${dados.LONGITUDE},     -- LONGITUDE 
+        ST_GeomFromText('POINT(${dados.LATITUDE} ${dados.LONGITUDE})', 4326)
+    );`;
+    console.log(sql);
+    return (sql);
+}
+
+// Query com múltiplos valores em uma única execução
+async function inserirPontos(query) {
+console.log(query);
+
+    const connection = await pool.getConnection();
+
+    try {
+        // Executa a query com todos os registros
+        const [result] = await connection.query(query);
+        console.log(`${result.affectedRows} registros inseridos!`);
+
+    } catch (err) {
+        console.error("Erro na inserção:", err);
+    } finally {
+        connection.release(); // Libera a conexão de volta para o pool
+    }
+}
+
 // Uso
+// Configuração da conexão
+const pool = mysql.createPool({
+    host: 'localhost',
+    user: 'ciata',
+    password: 'ciata',
+    database: 'ciata_cnefe',
+    waitForConnections: true,
+    connectionLimit: 10
+});
+
 leArquivosZip();
+

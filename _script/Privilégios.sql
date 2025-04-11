@@ -1,6 +1,6 @@
 CREATE USER ciata@localhost IDENTIFIED BY 'ciata';
 
-GRANT ALL PRIVILEGES ON geo.* TO ciata@localhost;
+GRANT ALL PRIVILEGES ON ciata_cnefe.* TO ciata@localhost;
 
 FLUSH PRIVILEGES;
 
