@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Mapa CNEFE com Leaflet</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    #map { height: 600px; width: 100%; }
+    .leaflet-container { background: #f8f9fa; } /* Cor de fundo quando não há basemap */
+    #controls {
+      margin: 10px 0;
+      padding: 10px;
+      background: #f0f0f0;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Endereços CNEFE</h1>
+  <div id="controls">
+    <label for="municipio">Código do Município:</label>
+    <input type="text" id="municipio" placeholder="Digite o COD_MUNICIPIO">
+    <button onclick="carregarDados()">Carregar Dados</button>
+  </div>
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Inicializa o mapa sem basemap
+    const map = L.map('map', {
+      center: [-14.2350, -51.9253], // Centro do Brasil
+      zoom: 4,
+      layers: [] // Sem camadas iniciais
+    });
+
+    // Cria uma camada vazia para a opção "Sem mapa base"
+    const emptyBasemap = L.layerGroup([]).addTo(map); // Adiciona como padrão
+
+    // Camadas base disponíveis (não adicionadas por padrão)
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    });
+
+    const googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+      maxZoom: 20,
+      subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+      attribution: 'Imagens © <a href="https://www.google.com/maps">Google Maps</a>'
+    });
+
+    const googleHybrid = L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}', {
+      maxZoom: 20,
+      subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+      attribution: 'Imagens © <a href="https://www.google.com/maps">Google Maps</a>'
+    });
+
+    const googleRoads = L.tileLayer('http://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+      maxZoom: 20,
+      subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+      attribution: 'Imagens © <a href="https://www.google.com/maps">Google Maps</a>'
+    });
+
+    const mapTilerStreets = L.tileLayer('https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=hI0imr4ZU7FQ4XcOW5fm', {
+      attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>',
+      maxZoom: 20
+    });
+
+    const mapTilerSatellite = L.tileLayer('https://api.maptiler.com/maps/satellite/{z}/{x}/{y}.jpg?key=hI0imr4ZU7FQ4XcOW5fm', {
+      attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>',
+      maxZoom: 20
+    });
+
+    // Cria um objeto de camadas base para controle de layers
+    const baseLayers = {
+      "Sem mapa base": emptyBasemap,
+      "OpenStreetMap": osmLayer,
+      "Google Maps": googleRoads,
+      "Google Satellite": googleSat,
+      "Google Hybrid": googleHybrid,
+      "MapTiler Streets": mapTilerStreets,
+      "MapTiler Satellite": mapTilerSatellite
+    };
+
+    // Adiciona controle de camadas ao mapa
+    L.control.layers(baseLayers, null, {collapsed: false}).addTo(map);
+
+    // Variável para armazenar a camada de pontos
+    let pointsLayer = null;
+
+    // Função para carregar dados com base no código do município
+    function carregarDados() {
+      const codMunicipio = document.getElementById('municipio').value.trim();
+      
+      if (!codMunicipio) {
+        alert("Por favor, informe o Código do Município");
+        return;
+      }
+
+      // Remove a camada anterior se existir
+      if (pointsLayer) {
+        map.removeLayer(pointsLayer);
+      }
+
+      // Mostra loading
+      const loadingControl = L.control({position: 'topright'});
+      loadingControl.onAdd = function() {
+        this._div = L.DomUtil.create('div', 'loading-control');
+        this._div.innerHTML = '<div style="background: white; padding: 5px;">Carregando...</div>';
+        return this._div;
+      };
+      loadingControl.addTo(map);
+
+      // Faz a requisição com o COD_MUNICIPIO
+      fetch(`http://smuu.com.br/ciata/cnefe-geojson?COD_MUNICIPIO=${encodeURIComponent(codMunicipio)}`)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Erro na requisição');
+          }
+          return response.json();
+        })
+        .then(geojsonData => {
+          // Remove o controle de loading
+          map.removeControl(loadingControl);
+          
+          // Adiciona os novos dados ao mapa
+          pointsLayer = L.geoJSON(geojsonData, {
+            pointToLayer: (feature, latlng) => {
+              return L.circleMarker(latlng, {
+                radius: 5,
+                fillColor: "#3388ff",
+                color: "#000",
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.8
+              });
+            },
+            onEachFeature: (feature, layer) => {
+              const props = feature.properties;
+              layer.bindPopup(`
+                <b>${props.nom_logradouro}</b><br>
+                ${props.num_quadra}<br>
+                Código Município: ${props.COD_MUNICIPIO || codMunicipio}
+              `);
+            }
+          }).addTo(map);
+
+          // Ajusta a view para mostrar todos os pontos
+          if (geojsonData.features && geojsonData.features.length > 0) {
+            map.fitBounds(pointsLayer.getBounds());
+          }
+        })
+        .catch(error => {
+          map.removeControl(loadingControl);
+          console.error("Erro ao carregar GeoJSON:", error);
+          alert("Falha ao carregar dados do servidor. Verifique o código do município.");
+        });
+    }
+  </script>
+</body>
+</html>

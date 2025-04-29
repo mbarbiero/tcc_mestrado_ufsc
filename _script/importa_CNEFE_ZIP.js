@@ -2,7 +2,7 @@ const yauzl = require('yauzl');
 const fs = require('fs');
 const csv = require('fast-csv');
 const path = require('path');
-const mysql = require('mysql2/promise'); 
+const mysql = require('mysql2/promise');
 const { Console } = require('console');
 
 const pastaTrabalho = './dados';
@@ -28,7 +28,7 @@ function streamCSVFromZip(zipFilePath) {
 
                     readStream
                         .pipe(csv.parse({ headers: true, delimiter: ';' }))
-                        .on('data', async(data) => {
+                        .on('data', async (data) => {
                             const query = await RetSqlCnefe(data);
                             await inserirPontos(query);
                             results.push(data);
@@ -131,7 +131,7 @@ async function RetSqlCnefe(dados) {
 
 // Query com múltiplos valores em uma única execução
 async function inserirPontos(query) {
-console.log(query);
+    console.log(query);
 
     const connection = await pool.getConnection();
 
@@ -150,6 +150,14 @@ console.log(query);
 // Uso
 // Configuração da conexão
 const pool = mysql.createPool({
+    host: 'mysql.smuu.com.br',
+    user: 'smuu_add1',
+    password: 'SmuuBd1',
+    database: 'smuu',
+    port: 3306
+});
+/*
+const pool = mysql.createPool({
     host: 'localhost',
     user: 'ciata',
     password: 'ciata',
@@ -157,6 +165,6 @@ const pool = mysql.createPool({
     waitForConnections: true,
     connectionLimit: 10
 });
-
+*/
 leArquivosZip();
 

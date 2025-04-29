@@ -34,10 +34,10 @@ app.get('/testar-conexao', (req, res) => {
 });
 
 app.get('/ciata/cnefe', (req, res) => {
-  const connection = mysql.createConnection(dbConfig);
+  const connection = mysql.createConnection(dbConfig); 
 
   // Consulta SQL (ajuste o nome da tabela conforme necessário)
-  const sql = 'SELECT * FROM CNEFE LIMIT 100'; // Limita a 100 registros para evitar sobrecarga
+  const sql = 'SELECT * FROM cnefe LIMIT 100'; // Limita a 100 registros para evitar sobrecarga
 
   connection.query(sql, (err, results) => {
     connection.end(); // Fecha a conexão após a consulta
@@ -47,25 +47,31 @@ app.get('/ciata/cnefe', (req, res) => {
       return res.status(500).json({ sucesso: false, erro: err.message });
     }
 
-    console.log(`Dados da CNEFE retornados: ${results.length} registros`);
+    console.log(`Dados da cnefe retornados: ${results.length} registros`);
     res.json({dados: results });
     //res.json({ sucesso: true, dados: results });
   });
 });
 
-app.get('ciata/cnefe-geojson', (req, res) => {
+app.get('/ciata/cnefe-geojson', (req, res) => {
   const connection = mysql.createConnection(dbConfig);
-  
-  // Supondo que a tabela CNEFE tem colunas de latitude/longitude
+  var qtd = 0;
+
+  // Supondo que a tabela cnefe tem colunas de latitude/longitude
   const sql = `
     SELECT 
       NUM_QUADRA,
       latitude,
-      longitude
-    FROM CNEFE
-    WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-    LIMIT 100
-  `;
+      longitude,
+      NOM_LOGRADOURO
+    FROM cnefe
+    WHERE 
+      COD_MUNICIPIO = '4316600' 
+--        AND
+--      NOM_LOGRADOURO = " RIO BRANCO"
+        AND
+      latitude IS NOT NULL AND longitude IS NOT NULL
+    `;
 
   connection.query(sql, (err, results) => {
     connection.end();
@@ -80,7 +86,8 @@ app.get('ciata/cnefe-geojson', (req, res) => {
       features: results.map(item => ({
         type: "Feature",
         properties: {
-          num_quadra: item.NUM_QUADRA
+          num_quadra: item.NUM_QUADRA,
+          nom_logradouro: item.NOM_LOGRADOURO
         },
         geometry: {
           type: "Point",
