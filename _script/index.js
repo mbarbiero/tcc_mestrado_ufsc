@@ -34,7 +34,7 @@ app.get('/testar-conexao', (req, res) => {
 });
 
 app.get('/ciata/cnefe', (req, res) => {
-  const connection = mysql.createConnection(dbConfig); 
+  const connection = mysql.createConnection(dbConfig);
 
   // Consulta SQL (ajuste o nome da tabela conforme necessário)
   const sql = 'SELECT * FROM cnefe LIMIT 100'; // Limita a 100 registros para evitar sobrecarga
@@ -48,7 +48,7 @@ app.get('/ciata/cnefe', (req, res) => {
     }
 
     console.log(`Dados da cnefe retornados: ${results.length} registros`);
-    res.json({dados: results });
+    res.json({ dados: results });
     //res.json({ sucesso: true, dados: results });
   });
 });
@@ -57,18 +57,24 @@ app.get('/ciata/cnefe-geojson', (req, res) => {
   const connection = mysql.createConnection(dbConfig);
   var qtd = 0;
 
-  // Supondo que a tabela cnefe tem colunas de latitude/longitude
+  const codMunicipio = req.query.COD_MUNICIPIO;
+  const codQuadra = req.query.COD_QUADRA;
+
+  // A tabela cnefe valores nas colunas de latitude/longitude
   const sql = `
-    SELECT 
+    SELECT DISTINCT
       NUM_QUADRA,
+      NUM_FACE,
       latitude,
       longitude,
-      NOM_LOGRADOURO
-    FROM cnefe
+      NOM_LOGRADOURO,
+      NUM_ENDERECO
+    FROM 
+      cnefe
     WHERE 
-      COD_MUNICIPIO = '4316600' 
---        AND
---      NOM_LOGRADOURO = " RIO BRANCO"
+      COD_MUNICIPIO = '${codMunicipio}' 
+        AND
+      NUM_QUADRA = '${codQuadra}'
         AND
       latitude IS NOT NULL AND longitude IS NOT NULL
     `;
@@ -87,7 +93,9 @@ app.get('/ciata/cnefe-geojson', (req, res) => {
         type: "Feature",
         properties: {
           num_quadra: item.NUM_QUADRA,
-          nom_logradouro: item.NOM_LOGRADOURO
+          num_face: item.NUM_FACE,
+          nom_logradouro: item.NOM_LOGRADOURO,
+          num_endereco: item.NUM_ENDERECO
         },
         geometry: {
           type: "Point",
@@ -96,6 +104,64 @@ app.get('/ciata/cnefe-geojson', (req, res) => {
       }))
     };
 
+    res.json(geojson);
+  });
+});
+
+app.get('/ciata/cnefe-minmax', (req, res) => {
+  const connection = mysql.createConnection(dbConfig);
+  var qtd = 0;
+
+  const codMunicipio = req.query.COD_MUNICIPIO;
+  const codQuadra = req.query.COD_QUADRA;
+
+  // A tabela cnefe valores nas colunas de latitude/longitude
+  const sql = `
+    SELECT 
+      min(latitude) as minLat,
+      min(longitude) as minLon,
+      max(latitude) as maxLat,
+      max(longitude) as maxLon
+    FROM 
+      cnefe
+    WHERE 
+      COD_MUNICIPIO = '${codMunicipio}' 
+        AND
+      NUM_QUADRA = '${codQuadra}'
+        AND
+      latitude IS NOT NULL AND longitude IS NOT NULL
+    `;
+
+  connection.query(sql, (err, results) => {
+    connection.end();
+
+    if (err) {
+      return res.status(500).json({ erro: err.message });
+    }
+
+
+    // Converter resultados para GeoJSON
+    const geojson = {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: {
+            num_quadra: codQuadra
+          },
+          geometry: {
+            type: "Polygon",
+            coordinates: [[
+              [parseFloat(results[0].minLon), parseFloat(results[0].minLat)],
+              [parseFloat(results[0].maxLon), parseFloat(results[0].minLat)],
+              [parseFloat(results[0].maxLon), parseFloat(results[0].maxLat)],
+              [parseFloat(results[0].minLon), parseFloat(results[0].maxLat)],
+              [parseFloat(results[0].minLon), parseFloat(results[0].minLat)]
+            ]]
+          }
+        }
+      ]
+    };
     res.json(geojson);
   });
 });

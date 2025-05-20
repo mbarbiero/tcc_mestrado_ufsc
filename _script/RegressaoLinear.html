@@ -3,7 +3,6 @@
 
 <head>
   <title>Mapa CNEFE com Leaflet</title>
-  <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     #map {
@@ -15,7 +14,6 @@
       background: #f8f9fa;
     }
 
-    /* Cor de fundo quando não há basemap */
     #controls {
       margin: 10px 0;
       padding: 10px;
@@ -29,25 +27,22 @@
   <h1>Endereços CNEFE</h1>
   <div id="controls">
     <label for="municipio">Código do Município:</label>
-    <input type="text" id="municipio" placeholder="Digite o COD_MUNICIPIO">
+    <input type="text" id="municipio" value="4310462" placeholder="Digite o COD_MUNICIPIO">
+    <input type="text" id="quadra" value="431046205000001P29" placeholder="Digite o COD_QUADRA">
     <button onclick="carregarDados()">Carregar Dados</button>
   </div>
   <div id="map"></div>
 
-  <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    // Inicializa o mapa sem basemap
     const map = L.map('map', {
-      center: [-14.2350, -51.9253], // Centro do Brasil
+      center: [-14.2350, -51.9253],
       zoom: 4,
-      layers: [] // Sem camadas iniciais
+      layers: []
     });
 
-    // Cria uma camada vazia para a opção "Sem mapa base"
-    const emptyBasemap = L.layerGroup([]).addTo(map); // Adiciona como padrão
+    const emptyBasemap = L.layerGroup([]).addTo(map);
 
-    // Camadas base disponíveis (não adicionadas por padrão)
     const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     });
@@ -80,7 +75,6 @@
       maxZoom: 20
     });
 
-    // Cria um objeto de camadas base para controle de layers
     const baseLayers = {
       "Sem mapa base": emptyBasemap,
       "OpenStreetMap": osmLayer,
@@ -91,31 +85,32 @@
       "MapTiler Satellite": mapTilerSatellite
     };
 
-    // Adiciona controle de camadas ao mapa
     L.control.layers(baseLayers, null, { collapsed: false }).addTo(map);
 
-    // Variável para armazenar a camada de pontos
     let pointsLayer = null;
+    let regressaoLayer = null;
 
-    // Pontos para cálculo do Convex Hull 
-    let pontos = [];  
-
-    // Função para carregar dados com base no código do município
-    
     function carregarDados() {
       const codMunicipio = document.getElementById('municipio').value.trim();
+      const codQuadra = document.getElementById('quadra').value.trim();
 
       if (!codMunicipio) {
         alert("Por favor, informe o Código do Município");
         return;
       }
 
-      // Remove a camada anterior se existir
       if (pointsLayer) {
         map.removeLayer(pointsLayer);
+        pointsLayer = null;
       }
 
-      // Mostra loading
+      if (regressaoLayer) {
+        map.removeLayer(regressaoLayer);
+        regressaoLayer = null;
+      }
+
+      const pontos = [];
+
       const loadingControl = L.control({ position: 'topright' });
       loadingControl.onAdd = function () {
         this._div = L.DomUtil.create('div', 'loading-control');
@@ -124,8 +119,7 @@
       };
       loadingControl.addTo(map);
 
-      // Faz a requisição com o COD_MUNICIPIO
-      fetch(`http://smuu.com.br/ciata/cnefe-geojson?COD_MUNICIPIO=${encodeURIComponent(codMunicipio)}`)
+      fetch(`http://smuu.com.br/ciata/cnefe-geojson?COD_MUNICIPIO=${encodeURIComponent(codMunicipio)}&COD_QUADRA=${encodeURIComponent(codQuadra)}`)
         .then(response => {
           if (!response.ok) {
             throw new Error('Erro na requisição');
@@ -133,15 +127,11 @@
           return response.json();
         })
         .then(geojsonData => {
-          // Remove o controle de loading
           map.removeControl(loadingControl);
-          //console.log(geojsonData);
 
-          // Adiciona os novos dados ao mapa
           pointsLayer = L.geoJSON(geojsonData, {
             pointToLayer: (feature, latlng) => {
-              let itemLatlng = [latlng.lat, latlng.lng];  // GeoJson usa lng, lat; e o Leafleat lat, lng
-              pontos.push(itemLatlng);
+              pontos.push([latlng.lng, latlng.lat, feature.properties.num_face]); // X = lon, Y = lat
               return L.circleMarker(latlng, {
                 radius: 5,
                 fillColor: "#3388ff",
@@ -156,16 +146,19 @@
               layer.bindPopup(`
                 <b>${props.nom_logradouro}, ${props.num_endereco}</b><br>
                 ${props.num_quadra}<br>
-                Código Município: ${props.COD_MUNICIPIO || codMunicipio}
+                Face: ${props.num_face}
               `);
             }
-          }
-        ).addTo(map);
+          }).addTo(map);
 
-          // Ajusta a view para mostrar todos os pontos
           if (geojsonData.features && geojsonData.features.length > 0) {
             map.fitBounds(pointsLayer.getBounds());
           }
+
+          for (let f = 1; f <= 10; f++) {
+            desenha_regresao(pontos, f);
+          }
+
         })
         .catch(error => {
           map.removeControl(loadingControl);
@@ -174,46 +167,66 @@
         });
     }
 
-    // Graham Scan: Algoritmo Convex Hull (simplificado)
-    function cross(o, a, b) {
-      return (a[0] - o[0]) * (b[1] - o[1]) -
-        (a[1] - o[1]) * (b[0] - o[0]);
-    }
+    function desenha_regresao(pontos, face) {
+      pontos_face = pontos.filter(p => p[2] === face.toString());
+      // Cálculo da reta de regressão
+      if (pontos_face.length >= 2) {
+        // --- Remove outliers com base no IQR (latitude - y) 10% ---
+        let xs = pontos_face.map(p => p[0]).sort((a, b) => a - b);
+        let ys = pontos_face.map(p => p[1]).sort((a, b) => a - b);
 
-    function convexHull(points) {
-      points.sort((a, b) => a[1] - b[1] || a[0] - b[0]);  // sort by lat, then lon
+        const p10x = xs[Math.floor(xs.length * 0.1)];
+        const p90x = xs[Math.floor(xs.length * 0.9)];
+        const iprx = p90x - p10x;
+        let minX = p10x - 1.5 * iprx;
+        let maxX = p90x + 1.5 * iprx;
 
-      console.log(points.length);
-      for (let p of points) {
-        console.log('points');
-      }
+        const p10y = ys[Math.floor(ys.length * 0.1)];
+        const p90y = ys[Math.floor(ys.length * 0.9)];
+        const ipry = p90y - p10y;
+        const minY = p10y - 1.5 * ipry;
+        const maxY = p90y + 1.5 * ipry;
 
-      const lower = [];
-      for (let p of points) {
-        console.log('points');
+        const pontosFiltrados = pontos_face.filter(p =>
+          p[0] >= minX && p[0] <= maxX &&
+          p[1] >= minY && p[1] <= maxY
+        );
 
-        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
-          lower.pop();
+        const xsFiltrados = pontosFiltrados.map(p => p[0]);
+        const ysFiltrados = pontosFiltrados.map(p => p[1]);
+
+        const xMean = xsFiltrados.reduce((a, b) => a + b, 0) / xsFiltrados.length;
+        const yMean = ysFiltrados.reduce((a, b) => a + b, 0) / ysFiltrados.length;
+
+        let numerator = 0;
+        let denominator = 0;
+        for (let i = 0; i < xsFiltrados.length; i++) {
+          numerator += (xsFiltrados[i] - xMean) * (ysFiltrados[i] - yMean);
+          denominator += (xsFiltrados[i] - xMean) ** 2;
         }
-        lower.push(p);
+
+        const m = numerator / denominator;
+        const b = yMean - m * xMean;
+
+        const rangeX = Math.max(...xsFiltrados) - Math.min(...xsFiltrados);
+        const ext = rangeX * 0.1;
+
+        const extendedMinX = Math.min(...xsFiltrados) - ext;
+        const extendedMaxX = Math.max(...xsFiltrados) + ext;
+
+        const startY = m * extendedMinX + b;
+        const endY = m * extendedMaxX + b;
+
+        regressaoLayer = L.polyline([
+          [startY, extendedMinX],
+          [endY, extendedMaxX]
+        ], {
+          color: 'red',
+          weight: 2,
+          dashArray: '6, 8'
+        }).addTo(map);
       }
-
-
-      const upper = [];
-      for (let i = points.length - 1; i >= 0; i--) {
-        let p = points[i];
-        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
-          upper.pop();
-        }
-        upper.push(p);
-      }
-
-      upper.pop();
-      lower.pop();
-
-      return lower.concat(upper);
     }
-
   </script>
 </body>
 
