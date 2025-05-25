@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+   <title>Quadras de endereços CNEFE</title>
+   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+   <style>
+      #map {
+         height: 600px;
+         width: 100%;
+      }
+
+      .leaflet-container {
+         background: #f8f9fa;
+      }
+
+      #controls {
+         margin: 10px 0;
+         padding: 10px;
+         background: #f0f0f0;
+         border-radius: 5px;
+      }
+   </style>
+</head>
+
+<body>
+   <h1>Endereços CNEFE</h1>
+   <div id="controls">
+      <label for="municipio">Código do Município:</label>
+      <input type="text" id="municipio" value="4310462" placeholder="Digite o COD_MUNICIPIO">
+      <button onclick="carregarDados()">Carregar Dados</button>
+   </div>
+   <div id="map"></div>
+
+   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+   <script>
+      const map = L.map('map', {
+         center: [-14.2350, -51.9253],
+         zoom: 4,
+         layers: []
+      });
+
+      const emptyBasemap = L.layerGroup([]).addTo(map);
+
+      const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      });
+
+      const googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+         maxZoom: 20,
+         subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+         attribution: 'Imagens © <a href="https://www.google.com/maps">Google Maps</a>'
+      });
+
+      const googleHybrid = L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}', {
+         maxZoom: 20,
+         subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+         attribution: 'Imagens © <a href="https://www.google.com/maps">Google Maps</a>'
+      });
+
+      const googleRoads = L.tileLayer('http://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+         maxZoom: 20,
+         subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+         attribution: 'Imagens © <a href="https://www.google.com/maps">Google Maps</a>'
+      });
+
+      const mapTilerStreets = L.tileLayer('https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=hI0imr4ZU7FQ4XcOW5fm', {
+         attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>',
+         maxZoom: 20
+      });
+
+      const mapTilerSatellite = L.tileLayer('https://api.maptiler.com/maps/satellite/{z}/{x}/{y}.jpg?key=hI0imr4ZU7FQ4XcOW5fm', {
+         attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>',
+         maxZoom: 20
+      });
+
+      const baseLayers = {
+         "Sem mapa base": emptyBasemap,
+         "OpenStreetMap": osmLayer,
+         "Google Maps": googleRoads,
+         "Google Satellite": googleSat,
+         "Google Hybrid": googleHybrid,
+         "MapTiler Streets": mapTilerStreets,
+         "MapTiler Satellite": mapTilerSatellite
+      };
+
+      L.control.layers(baseLayers, null, { collapsed: false }).addTo(map);
+
+      let pointsLayer = null;
+      let regressaoLayer = null;
+
+      function carregarDados() {
+         const codMunicipio = document.getElementById('municipio').value.trim();
+
+         if (!codMunicipio) {
+            alert("Por favor, informe o Código do Município");
+            return;
+         }
+
+         if (pointsLayer) {
+            map.removeLayer(pointsLayer);
+            pointsLayer = null;
+         }
+
+         if (regressaoLayer) {
+            map.removeLayer(regressaoLayer);
+            regressaoLayer = null;
+         }
+
+         const pontos = [];
+
+         const loadingControl = L.control({ position: 'topright' });
+         loadingControl.onAdd = function () {
+            this._div = L.DomUtil.create('div', 'loading-control');
+            this._div.innerHTML = '<div style="background: white; padding: 5px;">Carregando...</div>';
+            return this._div;
+         };
+         loadingControl.addTo(map);
+
+         fetch(`http://smuu.com.br/ciata/quadras-cnefe-geojson?COD_MUNICIPIO=${encodeURIComponent(codMunicipio)}`)
+            .then(response => {
+               if (!response.ok) {
+                  throw new Error('Erro na requisição');
+               }
+               return response.json();
+            })
+            .then(geojsonData => {
+               map.removeControl(loadingControl);
+
+               pointsLayer = L.geoJSON(geojsonData, {
+                  pointToLayer: (feature, latlng) => {
+                     pontos.push([latlng.lng, latlng.lat, feature.properties.num_quadra, feature.properties.num_face]); // X = lon, Y = lat
+                     return L.circleMarker(latlng, {
+                        radius: 5,
+                        fillColor: "#3388ff",
+                        color: "#000",
+                        weight: 0.5,
+                        opacity: 1,
+                        fillOpacity: 0.6
+                     });
+                  },
+                  onEachFeature: (feature, layer) => {
+                     const props = feature.properties;
+                     layer.bindPopup(
+                        `<b>${props.nom_logradouro}, ${props.num_endereco}</b><br>
+                        ${props.num_quadra}<br>
+                        Face: ${props.num_face}`
+                     );
+                  }
+               }).addTo(map);
+
+               if (geojsonData.features && geojsonData.features.length > 0) {
+                  map.fitBounds(pointsLayer.getBounds());
+               }
+
+               // ordena pontos por quadra e face
+               let pontos_face = []; let ponto_face = pontos[0]; pontos_face.push(ponto_face);
+               let quadra = ponto_face[2]; let face = ponto_face[3];
+               for (let lin = 1; lin < pontos.length; lin++) {
+                  ponto_face = pontos[lin];
+                  if (quadra !== ponto_face[2] || face !== ponto_face[3]) {
+                     desenha_regressao(pontos_face);
+                     quadra = ponto_face[2]; face = ponto_face[3];
+                     pontos_face = []
+                  }
+                  pontos_face.push(ponto_face);
+               }
+               desenha_regressao(pontos_face);
+
+            })
+            .catch(error => {
+               map.removeControl(loadingControl);
+               console.error("Erro ao carregar GeoJSON:", error);
+               alert("Falha ao carregar dados do servidor. Verifique o código do município.");
+            });
+      }
+
+      function desenha_regressao(pontos) {
+         pontos_face = pontos;
+         console.log(pontos.length);
+         // Cálculo da reta de regressão
+         if (pontos_face.length >= 2) {
+            // --- Remove outliers com base no IQR (latitude - y) 10% e longitude---
+            let xs = pontos_face.map(p => p[0]).sort((a, b) => a - b);
+            let ys = pontos_face.map(p => p[1]).sort((a, b) => a - b);
+
+            const p10x = xs[Math.floor(xs.length * 0.1)];
+            const p90x = xs[Math.floor(xs.length * 0.9)];
+            const iprx = p90x - p10x;
+            let minX = p10x - 1.5 * iprx;
+            let maxX = p90x + 1.5 * iprx;
+
+            const p10y = ys[Math.floor(ys.length * 0.1)];
+            const p90y = ys[Math.floor(ys.length * 0.9)];
+            const ipry = p90y - p10y;
+            const minY = p10y - 1.5 * ipry;
+            const maxY = p90y + 1.5 * ipry;
+
+            const pontosFiltrados = pontos_face.filter(p =>
+               p[0] >= minX && p[0] <= maxX &&
+               p[1] >= minY && p[1] <= maxY
+            );
+
+            const xsFiltrados = pontosFiltrados.map(p => p[0]);
+            const ysFiltrados = pontosFiltrados.map(p => p[1]);
+
+            const xMean = xsFiltrados.reduce((a, b) => a + b, 0) / xsFiltrados.length;
+            const yMean = ysFiltrados.reduce((a, b) => a + b, 0) / ysFiltrados.length;
+
+            let numerator = 0;
+            let denominator = 0;
+            for (let i = 0; i < xsFiltrados.length; i++) {
+               numerator += (xsFiltrados[i] - xMean) * (ysFiltrados[i] - yMean);
+               denominator += (xsFiltrados[i] - xMean) ** 2;
+            }
+
+            const m = numerator / denominator;
+            const b = yMean - m * xMean;
+
+            const rangeX = Math.max(...xsFiltrados) - Math.min(...xsFiltrados);
+            const ext = rangeX * 0.1;
+
+            const extendedMinX = Math.min(...xsFiltrados) - ext;
+            const extendedMaxX = Math.max(...xsFiltrados) + ext;
+
+            const startY = m * extendedMinX + b;
+            const endY = m * extendedMaxX + b;
+
+            regressaoLayer = L.polyline([
+               [startY, extendedMinX],
+               [endY, extendedMaxX]
+            ], {
+               color: 'red',
+               weight: 2,
+               //dashArray: '6, 8'
+            }).addTo(map);
+         }
+      }
+   </script>
+</body>
+
+</html>
