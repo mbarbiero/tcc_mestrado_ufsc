@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+   <meta charset="utf-8" />
+   <title>Alinhar Retângulo com Ruas</title>
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+   <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.13.0/dist/leaflet-geoman.css" />
+   <style>
+      #map {
+         height: 100vh;
+         width: 100vw;
+      }
+   </style>
+</head>
+
+<body>
+   <div id="map"></div>
+
+   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+   <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.13.0/dist/leaflet-geoman.min.js"></script>
+   <script>
+      const map = L.map('map').setView([-27.9364, -52.4260], 18);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+      // Ativar controles do Leaflet-Geoman
+      map.pm.addControls({
+         position: 'topleft',
+         drawRectangle: true,
+         rotateMode: true
+      });
+
+      // Exemplo: criar um retângulo e rotacioná-lo
+      const bounds = [
+         [-27.9365, -52.4267],
+         [-27.9362, -52.4264]
+      ];
+      const rectangle = L.rectangle(bounds, { color: 'blue' }).addTo(map);
+      retangulo.pm.enable({ allowRotation: true, allowResize: true });
+
+      // Calcular ângulo entre dois pontos (exemplo)
+      const p1 = map.latLngToLayerPoint(L.latLng(-27.9365, -52.4267));
+      const p2 = map.latLngToLayerPoint(L.latLng(-27.9362, -52.4264));
+      const angleRad = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+      const angleDeg = angleRad * (180 / Math.PI);
+
+      // Rotacionar o retângulo
+      rectangle.pm.rotateLayerToAngle(angleDeg);
+   </script>
+</body>
+
+</html>

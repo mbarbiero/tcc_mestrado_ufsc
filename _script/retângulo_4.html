@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Encaixar retângulo nos pontos</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
+  />
+  <style>
+    #map { height: 100vh; width: 100vw; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([-27.9364, -52.4260], 18);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    // Os 4 pontos geográficos (em ordem: frente, direita, fundos, esquerda)
+    const pontos = [
+      [-27.93626975, -52.4265315],     // P0 - frente
+      [-27.93663733, -52.4255405],     // P1 - direita
+      [-27.93696700, -52.42573371],    // P2 - fundos
+      [-27.93690460, -52.4264868]      // P3 - esquerda
+    ];
+
+    pontos.forEach((p, i) => {
+      L.circleMarker(p, {
+        radius: 5,
+        fillColor: "red",
+        color: "#000",
+        weight: 1,
+        fillOpacity: 1
+      }).addTo(map).bindPopup(`Ponto ${i + 1}`);
+    });
+
+    // Conversão para coordenadas projetadas
+    const zoom = map.getZoom();
+    const pts = pontos.map(p => map.project(L.latLng(p), zoom));
+
+    // Função para desenhar retângulo a partir do centro, largura, altura e ângulo
+    function gerarRetangulo(cx, cy, largura, altura, angRad) {
+      const cos = Math.cos(angRad);
+      const sin = Math.sin(angRad);
+      const w = largura / 2;
+      const h = altura / 2;
+
+      const cantos = [
+        { x: -w, y: -h },
+        { x:  w, y: -h },
+        { x:  w, y:  h },
+        { x: -w, y:  h }
+      ];
+
+      return cantos.map(p => {
+        const x = cx + p.x * cos - p.y * sin;
+        const y = cy + p.x * sin + p.y * cos;
+        return map.unproject({ x, y }, zoom);
+      });
+    }
+
+    // Função que calcula a distância de um ponto a um lado do retângulo (linha)
+    function distanciaPontoParaSegmento(p, a, b) {
+      const A = p.x - a.x;
+      const B = p.y - a.y;
+      const C = b.x - a.x;
+      const D = b.y - a.y;
+
+      const dot = A * C + B * D;
+      const lenSq = C * C + D * D;
+      const param = lenSq !== 0 ? dot / lenSq : -1;
+
+      let xx, yy;
+      if (param < 0) {
+        xx = a.x;
+        yy = a.y;
+      } else if (param > 1) {
+        xx = b.x;
+        yy = b.y;
+      } else {
+        xx = a.x + param * C;
+        yy = a.y + param * D;
+      }
+
+      const dx = p.x - xx;
+      const dy = p.y - yy;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // Otimização simples: testar várias rotações e tamanhos
+    let melhor = null;
+    let menorErro = Infinity;
+
+    for (let ang = 0; ang < Math.PI * 2; ang += Math.PI / 90) { // 2 graus de passo
+      for (let w = 80; w <= 160; w += 5) {
+        for (let h = 60; h <= 120; h += 5) {
+          const centro = {
+            x: (pts[0].x + pts[2].x) / 2,
+            y: (pts[0].y + pts[2].y) / 2
+          };
+
+          const ret = gerarRetangulo(centro.x, centro.y, w, h, ang).map(p => map.project(p, zoom));
+
+          const erro =
+            distanciaPontoParaSegmento(pts[0], ret[0], ret[1]) +
+            distanciaPontoParaSegmento(pts[1], ret[1], ret[2]) +
+            distanciaPontoParaSegmento(pts[2], ret[2], ret[3]) +
+            distanciaPontoParaSegmento(pts[3], ret[3], ret[0]);
+
+          if (erro < menorErro) {
+            menorErro = erro;
+            melhor = gerarRetangulo(centro.x, centro.y, w, h, ang);
+          }
+        }
+      }
+    }
+
+    // Desenha o melhor retângulo encontrado
+    L.polygon(melhor, {
+      color: 'green',
+      weight: 2,
+      fillOpacity: 0.2
+    }).addTo(map).bindPopup("Retângulo ajustado com ângulos retos");
+  </script>
+</body>
+</html>

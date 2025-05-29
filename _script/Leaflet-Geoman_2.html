@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+   <meta charset="utf-8" />
+   <title>Retângulo Alinhado com Ruas</title>
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+   <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.13.0/dist/leaflet-geoman.css" />
+   <style>
+      #map {
+         height: 100vh;
+         width: 100vw;
+      }
+   </style>
+</head>
+
+<body>
+   <div id="map"></div>
+
+   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+   <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.13.0/dist/leaflet-geoman.min.js"></script>
+   <script>
+      const map = L.map('map').setView([-27.9364, -52.4260], 18);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+      const pontos = [
+         [-27.93626975, -52.4265315],     // P0 - frente
+         [-27.93663733, -52.4255405],     // P1 - direita
+         [-27.93696700, -52.42573371],    // P2 - fundos
+         [-27.93690460, -52.4264868]      // P3 - esquerda
+      ];
+
+      pontos.forEach((p, i) => {
+         L.circleMarker(p, { radius: 5, color: 'blue' })
+            .bindTooltip('P' + i)
+            .addTo(map);
+      });
+
+      const zoom = map.getZoom();
+
+      // Projeta os pontos geográficos para coordenadas em pixels
+      const projPoints = pontos.map(p => map.project(L.latLng(p), zoom));
+
+      /* 
+      Ajusta largura e altura para encaixar o retângulo nos pontos se as dimensões não forem fornecidas
+      */
+      let largura = 0; // 112 valor par teste
+      let altura = 0; // 86 valor par teste
+      largura = largura > 0 ? largura : (projPoints[1].x - projPoints[3].x) / 2;
+      altura = altura > 0 ? altura : (projPoints[2].y - projPoints[0].y) / 2;
+
+      // Centro aproximado entre os quatro pontos
+      const centroX = (projPoints[0].x + projPoints[1].x + projPoints[2].x + projPoints[3].x) / 4;
+      const centroY = (projPoints[0].y + projPoints[1].y + projPoints[2].y + projPoints[3].y) / 4;
+
+      // Ângulo de rotação com base na linha entre frente e fundos
+      const angulo = Math.atan2(projPoints[2].y - projPoints[0].y, projPoints[2].x - projPoints[0].x);
+
+      function gerarRetangulo(cx, cy, largura, altura, angRad, map, zoom) {
+         const cos = Math.cos(angRad);
+         const sin = Math.sin(angRad);
+         const w = largura;
+         const h = altura;
+
+         const cantos = [
+            { x: -w, y: -h },
+            { x: w, y: -h },
+            { x: w, y: h },
+            { x: -w, y: h }
+         ];
+
+         return cantos.map(p => {
+            const x = cx + p.x * cos - p.y * sin;
+            const y = cy + p.x * sin + p.y * cos;
+            return map.unproject({ x, y }, zoom);
+         });
+      }
+
+      const pontosRet = gerarRetangulo(centroX, centroY, Math.abs(largura), Math.abs(altura), angulo, map, zoom);
+
+      const retangulo = L.polygon(pontosRet, { color: 'red', fillOpacity: 0.3 }).addTo(map);
+
+      // Habilita controles Geoman
+      retangulo.pm.enable({
+         allowRotation: true,
+         allowResize: true,
+         allowEditing: true
+      });
+
+      map.pm.addControls({
+         position: 'topleft',
+         drawPolygon: false,
+         drawMarker: false,
+         drawPolyline: false,
+         drawCircle: false,
+         drawRectangle: false,
+         drawCircleMarker: false,
+         editMode: true,
+         dragMode: true,
+         cutPolygon: false,
+         removalMode: true,
+         rotateMode: true
+      });
+   </script>
+</body>
+
+</html>

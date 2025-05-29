@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Quadra alinhada com logradouros</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
+  />
+  <style>
+    #map { height: 100vh; width: 100vw; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <script>
+    // Inicializa o mapa
+    const map = L.map('map').setView([-27.9366, -52.426], 18);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    // Pontos dos logradouros
+    const pontos = [
+      [-27.93626975, -52.4265315],     // ponto 0 - frente
+      [-27.93663733, -52.4255405],     // ponto 1 - direita
+      [-27.93696700, -52.42573371],    // ponto 2 - fundos
+      [-27.93690460, -52.4264868]      // ponto 3 - esquerda
+    ];
+
+    // Dimensões da quadra (em metros)
+    const largura = 115; // frente/fundos
+    const altura = 86;   // laterais
+
+    const zoom = map.getZoom();
+
+    // Converte lat/lng para coordenadas de pixel no mapa
+    const p0 = map.project(pontos[0], zoom);
+    const p1 = map.project(pontos[1], zoom);
+
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    const ang = Math.atan2(dy, dx);
+
+    const cos = Math.cos(ang);
+    const sin = Math.sin(ang);
+
+    // Vetores orientados conforme o lado frente
+    const ux = { x: cos, y: sin };      // direção da frente (115m)
+    const uy = { x: -sin, y: cos };     // direção da lateral (86m)
+
+    const halfL = largura / 2;
+    const halfA = altura / 2;
+
+    // Canto inferior esquerdo do retângulo
+    const baseX = p0.x - ux.x * halfL - uy.x * halfA;
+    const baseY = p0.y - ux.y * halfL - uy.y * halfA;
+
+    // Vértices do retângulo
+    const pxRet = [
+      { x: baseX, y: baseY },
+      { x: baseX + ux.x * largura, y: baseY + ux.y * largura },
+      { x: baseX + ux.x * largura + uy.x * altura, y: baseY + ux.y * largura + uy.y * altura },
+      { x: baseX + uy.x * altura, y: baseY + uy.y * altura }
+    ];
+
+    // Converte para LatLng e desenha o polígono
+    const retLatLng = pxRet.map(p => map.unproject(p, zoom));
+
+    L.polygon(retLatLng, {
+      color: 'green',
+      weight: 2,
+      fillOpacity: 0.3
+    }).addTo(map).bindPopup("Quadra com ângulos retos alinhada ao ponto 0");
+
+    // Marcar pontos dos logradouros
+    pontos.forEach((p, i) => {
+      L.circleMarker(p, {
+        radius: 5,
+        fillColor: "red",
+        color: "#000",
+        weight: 1,
+        fillOpacity: 0.9
+      }).addTo(map).bindPopup(`Logradouro ${i}`);
+    });
+  </script>
+</body>
+</html>

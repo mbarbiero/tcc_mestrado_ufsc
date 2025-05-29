@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Quadra urbana com rotação</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <style>#map { height: 100vh; }</style>
+</head>
+<body>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+<script>
+  const map = L.map('map').setView([-23.5, -46.6], 16);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+  // Pontos representando os logradouros
+  const A = [-27.93626975,-52.4265315]; // PEDRO BELEDELLI, 306
+  const B = [-27.936967000000003,-52.42573371428572]; // DO COMERCIO, 0SN
+
+  // Medidas da quadra (em metros)
+  const width = 40;  // lado curto
+  const height = 60; // lado longo
+
+  // Calcular ângulo de orientação entre os dois logradouros
+  function getAngleDegrees(p1, p2) {
+    const lat1 = p1[0] * Math.PI / 180;
+    const lat2 = p2[0] * Math.PI / 180;
+    const dLon = (p2[1] - p1[1]) * Math.PI / 180;
+
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) -
+              Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+    const angle = Math.atan2(y, x);
+    return angle * 180 / Math.PI;
+  }
+
+  const angle = getAngleDegrees(A, B);
+
+  // Centralizar no ponto médio
+  const center = [
+    (A[0] + B[0]) / 2,
+    (A[1] + B[1]) / 2
+  ];
+
+  // Criar retângulo em metros e rotacionar
+  function createRotatedRectangle(center, width, height, angleDeg) {
+    const zoom = map.getZoom();
+    const centerPx = map.project(center, zoom);
+
+    const w = width / 2;
+    const h = height / 2;
+
+    const angleRad = angleDeg * Math.PI / 180;
+    const cos = Math.cos(angleRad);
+    const sin = Math.sin(angleRad);
+
+    const corners = [
+      [-w, -h],
+      [w, -h],
+      [w, h],
+      [-w, h]
+    ];
+
+    const rotated = corners.map(([x, y]) => {
+      const xRot = x * cos - y * sin + centerPx.x;
+      const yRot = x * sin + y * cos + centerPx.y;
+      return map.unproject([xRot, yRot], zoom);
+    });
+
+    rotated.push(rotated[0]); // fechar o polígono
+
+    return rotated;
+  }
+
+  const polygon = createRotatedRectangle(center, width, height, angle);
+  L.polygon(polygon, { color: 'blue' }).addTo(map).bindPopup(`Quadra orientada`);
+</script>
+</body>
+</html>

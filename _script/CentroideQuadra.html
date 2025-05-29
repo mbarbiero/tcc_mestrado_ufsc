@@ -33,7 +33,6 @@
    <div id="map"></div>
 
    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-   <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
    <script>
       const map = L.map('map', {
          center: [-14.2350, -51.9253],
@@ -88,7 +87,7 @@
       L.control.layers(baseLayers, null, { collapsed: false }).addTo(map);
 
       let pointsLayer = null;
-      let regressaoLayer = null;
+      let centroideLayer = null;
 
       function carregarDados() {
          const codMunicipio = document.getElementById('municipio').value.trim();
@@ -103,9 +102,9 @@
             pointsLayer = null;
          }
 
-         if (regressaoLayer) {
-            map.removeLayer(regressaoLayer);
-            regressaoLayer = null;
+         if (centroideLayer) {
+            map.removeLayer(centroideLayer);
+            centroideLayer = null;
          }
 
          const pontos = [];
@@ -132,7 +131,7 @@
                   pointToLayer: (feature, latlng) => {
                      pontos.push([latlng.lat, latlng.lng, feature.properties.num_quadra, feature.properties.num_face]); // X = lon, Y = lat
                      return L.circleMarker(latlng, {
-                        radius: 5,
+                        radius: 3,
                         fillColor: "#3388ff",
                         color: "#000",
                         weight: 0.5,
@@ -197,7 +196,7 @@
       }
 
       // função para calcular o centróide
-      function CalculaCentroide(coords, indOutliers = 0) {  // coords deve ser [lat,lon,...]
+      function CalculaCentroide(coords) {  // coords deve ser [lat,lon,...]
 
          let somaLat = 0;
          let somaLon = 0;
@@ -216,7 +215,7 @@
       > coords é uma matriz no formato [[lat, lon, ...]]
       > multiplicador é usado para eliminar outliers (multiplicador * desvio padrão)
       */
-      function DesenhaCentroide(coords, multiplicador = 1) {
+      function DesenhaCentroide(coords, multiplicador = 2) {
          // centroide preliminar
          const centroidePre = CalculaCentroide(coords);
          let pontosFiltrados = coords;
@@ -235,10 +234,10 @@
             pontosFiltrados = coords.filter((pt, i) => distancias[i] <= limite);
          }
 
-         // calcular o centróide final
+         // Calcular o centróide final
          const centroideFinal = CalculaCentroide(pontosFiltrados);
 
-         console.log(centroideFinal);
+         // console.log(centroideFinal);
 
          L.circleMarker(centroideFinal, {
             radius: 5,
@@ -247,7 +246,9 @@
             weight: 0.5,
             opacity: 1,
             fillOpacity: 0.6
-         }).addTo(map);
+         })
+         .addTo(map)
+         .bindPopup(`${centroideFinal}`);
 
          return (centroideFinal);
       }

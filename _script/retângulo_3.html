@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+   <meta charset="utf-8" />
+   <title>Retas Paralelas Máxima Distância</title>
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+   <style>
+      #map {
+         height: 100vh;
+         width: 100vw;
+      }
+   </style>
+</head>
+
+<body>
+   <div id="map"></div>
+
+   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+   <script>
+      const map = L.map('map').setView([-27.9364, -52.4260], 18);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+      const pontos = [
+         [-27.93626975, -52.4265315],     // ponto 0 - frente
+         [-27.93663733, -52.4255405],     // ponto 1 - direita
+         [-27.93696700, -52.42573371],    // ponto 2 - fundos
+         [-27.93690460, -52.4264868]      // ponto 3 - esquerda
+      ];
+
+      // Dois pontos geográficos
+      const ponto1 = L.latLng(-27.93663733, -52.4255405);
+      const ponto2 = L.latLng(-27.93690460, -52.4264868);
+
+      // Projeção dos pontos para coordenadas em pixels/metros
+      const zoom = map.getZoom();
+      const p1 = map.project(ponto1, zoom);
+      const p2 = map.project(ponto2, zoom);
+
+      // Vetor entre os dois pontos
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+
+      // Vetor perpendicular
+      const length = Math.sqrt(dx * dx + dy * dy);
+      const ux = -dy / length;
+      const uy = dx / length;
+
+      // Comprimento do segmento de reta
+      const offset = 1000; // em pixels/metros relativos à projeção
+
+      // Função que gera uma linha longa centrada no ponto e alinhada ao vetor perpendicular
+      function linhaParalela(px, py) {
+         const pA = { x: px - ux * offset, y: py - uy * offset };
+         const pB = { x: px + ux * offset, y: py + uy * offset };
+         return [map.unproject(pA, zoom), map.unproject(pB, zoom)];
+      }
+
+      // Criar as duas linhas paralelas
+      const linha1 = linhaParalela(p1.x, p1.y);
+      const linha2 = linhaParalela(p2.x, p2.y);
+
+      // Adicionar ao mapa
+      L.polyline(linha1, { color: 'blue', weight: 2 }).addTo(map).bindPopup("Reta 1");
+      L.polyline(linha2, { color: 'green', weight: 2 }).addTo(map).bindPopup("Reta 2");
+
+      // Marcar os pontos de origem
+      [ponto1, ponto2].forEach((p, i) =>
+         L.circleMarker(p, {
+            radius: 5,
+            fillColor: "red",
+            color: "#000",
+            weight: 1,
+            fillOpacity: 1
+         }).addTo(map).bindPopup(`Ponto ${i + 1}`)
+      );
+   </script>
+</body>
+
+</html>

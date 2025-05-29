@@ -17,7 +17,7 @@ const dbConfig = {
   port: 3306
 };
 
-app.get('/testar-conexao', (req, res) => {
+app.get('/ciata/testar-conexao', (req, res) => {
   const connection = mysql.createConnection(dbConfig);
 
   connection.connect((err) => {
@@ -100,6 +100,115 @@ app.get('/ciata/cnefe-geojson', (req, res) => {
         geometry: {
           type: "Point",
           coordinates: [parseFloat(item.longitude), parseFloat(item.latitude)]
+        }
+      }))
+    };
+
+    res.json(geojson);
+  });
+});
+
+app.get('/ciata/quadras-cnefe-geojson', (req, res) => {
+  const connection = mysql.createConnection(dbConfig);
+  var qtd = 0;
+
+  const codMunicipio = req.query.COD_MUNICIPIO;
+
+  // A tabela cnefe valores nas colunas de latitude/longitude
+  const sql = `
+    SELECT DISTINCT
+      NUM_QUADRA,
+      NUM_FACE,
+      latitude,
+      longitude,
+      NOM_LOGRADOURO,
+      NUM_ENDERECO
+    FROM 
+      cnefe
+    WHERE 
+      COD_MUNICIPIO = '${codMunicipio}' 
+        AND
+      latitude IS NOT NULL AND longitude IS NOT NULL
+    ORDER BY
+      NUM_QUADRA, NUM_FACE
+    `;
+
+  connection.query(sql, (err, results) => {
+    connection.end();
+
+    if (err) {
+      return res.status(500).json({ erro: err.message });
+    }
+
+    // Converter resultados para GeoJSON
+    const geojson = {
+      type: "FeatureCollection",
+      features: results.map(item => ({
+        type: "Feature",
+        properties: {
+          num_quadra: item.NUM_QUADRA,
+          num_face: item.NUM_FACE,
+          nom_logradouro: item.NOM_LOGRADOURO,
+          num_endereco: item.NUM_ENDERECO
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [parseFloat(item.longitude), parseFloat(item.latitude)]
+        }
+      }))
+    };
+
+    res.json(geojson);
+  });
+});
+
+
+app.get('/ciata/CentroideFacesGeojson', (req, res) => {
+  const connection = mysql.createConnection(dbConfig);
+  var qtd = 0;
+
+  const codMunicipio = req.query.COD_MUNICIPIO;
+
+  // A tabela cnefe valores nas colunas de latitude/longitude
+  const sql = `
+    SELECT DISTINCT
+      NUM_QUADRA,
+      NUM_FACE,
+      TIPO_LOGRADOURO,
+      NOM_LOGRADOURO,
+      LATITUDE_CENTROIDE,
+      LONGITUDE_CENTROIDE      
+    FROM 
+      CNEFE_FACES
+    WHERE 
+      COD_MUNICIPIO = '${codMunicipio}' 
+        AND
+      LATITUDE_CENTROIDE IS NOT NULL AND LONGITUDE_CENTROIDE IS NOT NULL
+    ORDER BY
+      NUM_QUADRA, NUM_FACE
+    `;
+
+  connection.query(sql, (err, results) => {
+    connection.end();
+
+    if (err) {
+      return res.status(500).json({ erro: err.message });
+    }
+
+    // Converter resultados para GeoJSON
+    const geojson = {
+      type: "FeatureCollection",
+      features: results.map(item => ({
+        type: "Feature",
+        properties: {
+          num_quadra: item.NUM_QUADRA,
+          num_face: item.NUM_FACE,
+          tipo_logradouro: item.TIPO_LOGRADOURO,
+          nom_logradouro: item.NOM_LOGRADOURO
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [parseFloat(item.LONGITUDE_CENTROIDE), parseFloat(item.LATITUDE_CENTROIDE)]
         }
       }))
     };
