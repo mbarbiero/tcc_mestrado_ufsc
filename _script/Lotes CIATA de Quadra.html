@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Análise Técnica de Lotes</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'monospace'; }
+        #map { height: 100vh; width: 100vw; background: #f8f9fa; }
+
+        .floating-panel {
+            position: absolute; top: 10px; left: 50px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.98); padding: 15px;
+            border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            border-left: 8px solid #d93025; width: 350px;
+        }
+
+        .btn-export {
+            background: #1a73e8; color: white; border: none; padding: 8px 12px;
+            border-radius: 4px; cursor: pointer; width: 100%; margin-top: 10px;
+        }
+
+        .lote-label {
+            background: none; border: none; box-shadow: none;
+            color: #d93025; font-weight: bold; font-size: 9px; text-shadow: 1px 1px 0px #fff;
+        }
+    </style>
+</head>
+<body>
+
+<div class="floating-panel">
+    <strong style="font-size: 1.2em;">Análise de Dimensões GEO</strong><br>
+    <small>Foz do Iguaçu - Quadra 0054</small>
+    
+    <div style="margin: 10px 0;">
+        <input type="file" id="csvFile" accept=".csv" style="font-size: 0.8em;">
+    </div>
+
+    <div id="status" style="font-size: 0.8em; color: #666;">Aguarde o carregamento do CSV...</div>
+    
+    <button class="btn-export" onclick="exportarTabela()">Exportar Tabela de Dimensões</button>
+</div>
+
+<div id="map"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+    const refOriginal = [-25.68070, -53.80205];
+    const anguloFixo = 346;
+    let dadosProcessados = [];
+
+    const map = L.map('map', { zoomControl: true }).setView(refOriginal, 20);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21 }).addTo(map);
+
+    let camadaLotes = L.layerGroup().addTo(map);
+
+    // --- CÁLCULOS GEOMÉTRICOS ---
+
+    function calcularDistancia(p1, p2) {
+        const R = 6371000;
+        const dLat = (p2[0] - p1[0]) * Math.PI / 180;
+        const dLon = (p2[1] - p1[1]) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function rotacionarPonto(p, centro, graus) {
+        const rad = graus * (Math.PI / 180);
+        const latRel = p[0] - centro[0];
+        const lonRel = p[1] - centro[1];
+        return [
+            latRel * Math.cos(rad) - lonRel * Math.sin(rad) + centro[0],
+            latRel * Math.sin(rad) + lonRel * Math.cos(rad) + centro[1]
+        ];
+    }
+
+    function analisarDimensoes(coords) {
+        let distancias = [];
+        for (let i = 0; i < coords.length - 1; i++) {
+            distancias.push(calcularDistancia(coords[i], coords[i+1]));
+        }
+        distancias.sort((a, b) => b - a);
+        // Estimativa: As menores são testadas, as maiores são profundidades
+        return {
+            testada: distancias[distancias.length - 2] || 0, // Segunda menor (ignora fechamentos minúsculos)
+            profundidade: distancias[0] || 0 // Maior aresta
+        };
+    }
+
+    // --- PROCESSAMENTO ---
+
+    document.getElementById('csvFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        Papa.parse(file, {
+            header: true,
+            complete: function(res) {
+                renderizar(res.data);
+            }
+        });
+    });
+
+    function renderizar(dados) {
+        camadaLotes.clearLayers();
+        dadosProcessados = [];
+
+        dados.forEach(item => {
+            if (!item.geometria) return;
+
+            // Extração manual de WKT simplificada
+            const rawCoords = item.geometria.match(/-?\d+\.\d+\s-?\d+\.\d+/g);
+            if (!rawCoords) return;
+
+            const coords = rawCoords.map(s => {
+                const [lon, lat] = s.split(" ").map(Number);
+                return [lat, lon];
+            });
+
+            const rotacionadas = coords.map(p => rotacionarPonto(p, refOriginal, anguloFixo));
+            const dim = analisarDimensoes(rotacionadas);
+            
+            // Armazenar para exportação
+            dadosProcessados.push({
+                codigo: item.codigo_cartografico,
+                testada: dim.testada.toFixed(2),
+                profundidade: dim.profundidade.toFixed(2)
+            });
+
+            // Desenhar Polígono
+            L.polygon(rotacionadas, {
+                color: '#d93025', weight: 1, fillColor: '#f57c00', fillOpacity: 0.3
+            }).addTo(camadaLotes);
+
+            // Rótulo com Código e Dimensões
+            const centroLote = [
+                rotacionadas.reduce((a,b) => a + b[0], 0) / rotacionadas.length,
+                rotacionadas.reduce((a,b) => a + b[1], 0) / rotacionadas.length
+            ];
+
+            L.marker(centroLote, {
+                icon: L.divIcon({
+                    className: 'lote-label',
+                    html: `${item.codigo_cartografico.split('.').pop()}<br>${dim.testada.toFixed(1)}x${dim.profundidade.toFixed(1)}`,
+                    iconSize: [60, 20]
+                })
+            }).addTo(camadaLotes);
+        });
+
+        // Ponto Central Vermelho
+        L.circleMarker(refOriginal, { color: 'red', radius: 5, fillOpacity: 1 }).addTo(camadaLotes);
+        document.getElementById('status').innerText = `${dadosProcessados.length} lotes analisados.`;
+    }
+
+    function exportarTabela() {
+        if (dadosProcessados.length === 0) return alert("Carregue o CSV primeiro!");
+        
+        let csvContent = "data:text/csv;charset=utf-8,Codigo_Cartografico,Testada_m,Profundidade_m\n" 
+            + dadosProcessados.map(e => `${e.codigo},${e.testada},${e.profundidade}`).join("\n");
+
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "tabela_dimensoes_lotes.csv");
+        document.body.appendChild(link);
+        link.click();
+    }
+</script>
+</body>
+</html>

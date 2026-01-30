@@ -8,7 +8,7 @@ const rawData = fs.readFileSync(inputFile, 'utf-8');
 const imoveis = JSON.parse(rawData);
 
 // 2. Cabeçalho do CSV
-let csvLines = ['COD_MUNICIPIO;COD_UNICO_ENDERECO;ID_QUADRA;NOM_LOGRADOURO;NUM_ENDERECO;NOM_LOGRADOURO_ADJACENTE;DIM_TESTADA;DIM_PROFUNDIDADE'];
+let csvLines = ['COD_MUNICIPIO;COD_UNICO_ENDERECO;ID_LOTE;ID_QUADRA;NOM_LOGRADOURO;NUM_ENDERECO;NOM_LOGRADOURO_ADJACENTE;DIM_TESTADA;DIM_PROFUNDIDADE'];
 
 // 3. Processamento
 imoveis.forEach(imovel => {
@@ -22,6 +22,8 @@ imoveis.forEach(imovel => {
     // REGRA NOVA: idLoteUrbano menos os últimos 5 caracteres
     let idLoteRaw = dg.idLoteUrbano || '';
     const idQuadra = idLoteRaw.length > 5 ? idLoteRaw.slice(0, -5) : idLoteRaw;
+
+    const idLote = idLoteRaw;
 
     const numEndereco = end.numeroImovel || '';
     const nomLogradouroAdjacente = "";
@@ -42,6 +44,7 @@ imoveis.forEach(imovel => {
     csvLines.push([
         codMunicipio,
         codUnicoEndereco,
+        idLote,
         idQuadra,
         logradouroLimpo,
         numEndereco,

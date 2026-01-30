@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Representação Final TCC</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'monospace'; }
+        #map { height: 100vh; width: 100vw; background: #f0f0f0; }
+
+        .floating-panel {
+            position: absolute; top: 10px; left: 50px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.95); padding: 15px;
+            border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            border-left: 8px solid #f57c00;
+            width: 280px;
+        }
+
+        .legenda-titulo { font-weight: bold; font-size: 1.1em; color: #202124; margin-bottom: 5px; display: block; }
+        .dim-label { 
+            background: rgba(255, 255, 255, 0.9); 
+            border: 1px solid #d93025; 
+            padding: 1px 4px; 
+            border-radius: 3px; 
+            font-size: 10px; 
+            font-weight: bold;
+            color: #d93025;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div class="floating-panel">
+    <span class="legenda-titulo">Dimensões da quadra GEO</span>
+    <div style="font-size: 0.85em; color: #444;">
+        <span style="color: #f57c00;">■</span> Área de Estudo (Rotacionada 346°)<br>
+        <span style="color: #d93025;">●</span> Centro Geométrico da Quadra
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const refOriginal = [-25.68070, -53.80205];
+    const map = L.map('map', { zoomControl: true }).setView(refOriginal, 20);
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21 }).addTo(map);
+
+    const coordsOriginais = [
+        [-25.68108982901844, -53.80246383455921], [-25.680698435628713, -53.80234488174822], 
+        [-25.680524482953125, -53.80229201412075], [-25.68032878615041, -53.8022325382522], 
+        [-25.680133089302565, -53.802173062608276], [-25.680180995298507, -53.80198109568479], 
+        [-25.680228901053848, -53.801789128583714], [-25.68027680656876, -53.80159716130499], 
+        [-25.68032471184314, -53.8014051938488], [-25.68037261687702, -53.80121322621506], 
+        [-25.680633546673985, -53.80129252529386], [-25.68076401154238, -53.801332174983195], 
+        [-25.680937964669006, -53.80138504139093], [-25.681035813287117, -53.80141477882328], 
+        [-25.681133661893856, -53.801444516311804], [-25.681329359073576, -53.80150399145751], 
+        [-25.681281453543583, -53.80169596043298], [-25.68123354777315, -53.80188792923088], 
+        [-25.68118564176211, -53.8020798978513], [-25.681161688666386, -53.80217588209482], 
+        [-25.68113373551053, -53.80227186629405], [-25.68108982901844, -53.80246383455921]
+    ];
+
+    function calcularDistancia(p1, p2) {
+        const R = 6371000;
+        const dLat = (p2[0] - p1[0]) * Math.PI / 180;
+        const dLon = (p2[1] - p1[1]) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(p1[0] * Math.PI / 180) * Math.cos(p2[0] * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function rotacionar(coords, centro, graus) {
+        const rad = graus * (Math.PI / 180);
+        return coords.map(p => {
+            const lat = p[0] - centro[0];
+            const lon = p[1] - centro[1];
+            const rLat = lat * Math.cos(rad) - lon * Math.sin(rad);
+            const rLon = lat * Math.sin(rad) + lon * Math.cos(rad);
+            return [rLat + centro[0], rLon + centro[1]];
+        });
+    }
+
+    // Aplica rotação de 346°
+    const coordsRotacionadas = rotacionar(coordsOriginais, refOriginal, 346);
+
+    // Calcula o centroide real da quadra rotacionada para o ponto vermelho
+    let somaLat = 0, somaLon = 0;
+    coordsRotacionadas.forEach(p => { somaLat += p[0]; somaLon += p[1]; });
+    const centroReal = [somaLat / coordsRotacionadas.length, somaLon / coordsRotacionadas.length];
+
+    // Desenha a quadra
+    L.polygon(coordsRotacionadas, {
+        color: '#f57c00', weight: 3, fillColor: '#ffa726', fillOpacity: 0.5 
+    }).addTo(map);
+
+    // Dimensões nas arestas
+    const indicesArestas = [0, 4, 9, 15, 20]; 
+    for(let i=0; i < indicesArestas.length - 1; i++){
+        const pA = coordsRotacionadas[indicesArestas[i]];
+        const pB = coordsRotacionadas[indicesArestas[i+1]];
+        const dist = calcularDistancia(pA, pB);
+        const meio = [(pA[0] + pB[0])/2, (pA[1] + pB[1])/2];
+
+        L.marker(meio, {
+            icon: L.divIcon({
+                className: 'dim-label',
+                html: dist.toFixed(1) + "m",
+                iconSize: [45, 15]
+            })
+        }).addTo(map);
+    }
+
+    // PONTO VERMELHO NO CENTRO DA QUADRA
+    L.circleMarker(centroReal, { 
+        color: '#d93025', 
+        fillColor: '#ff4d4d',
+        fillOpacity: 1,
+        radius: 6,
+        weight: 2
+    }).addTo(map);
+
+</script>
+</body>
+</html>
