@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Simplificação de Quadra</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'monospace'; }
+        #map { height: 100vh; width: 100vw; background: #e0e0e0; }
+        .floating-panel {
+            position: absolute; top: 10px; left: 50px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.95); padding: 15px;
+            border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            width: 350px; border-left: 8px solid #d32f2f;
+        }
+        .edge-label {
+            background: white; border: 1px solid #d32f2f;
+            color: #d32f2f; font-weight: bold; padding: 2px 5px;
+            border-radius: 3px; font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+
+<div class="floating-panel">
+    <strong>Simplificação de Polígono</strong><br>
+    <small>Conversão para Quadrilátero Técnico</small>
+    <div id="metrics" style="margin-top:10px; font-size: 0.9em; line-height: 1.4;"></div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const centroide = [-25.68070, -53.80205];
+    const map = L.map('map').setView(centroide, 19);
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    // Geometria Original (Vários pontos)
+    const geoOriginal = [
+        [-25.681089, -53.802463], [-25.680133, -53.802173],
+        [-25.680372, -53.801213], [-25.681329, -53.801503],
+        [-25.681089, -53.802463]
+    ];
+
+    // 1. Definir os 4 cantos principais (Simplificação manual baseada nos extremos)
+    const quadrilatero = [
+        [-25.681089, -53.802463], // Sudoeste
+        [-25.680133, -53.802173], // Noroeste
+        [-25.680372, -53.801213], // Nordeste
+        [-25.681329, -53.801503]  // Sudeste
+    ];
+
+    // Função para calcular distância e colocar label na aresta
+    function desenharArestas(pontos) {
+        let htmlMetrics = "";
+        for (let i = 0; i < pontos.length; i++) {
+            const p1 = L.latLng(pontos[i]);
+            const p2 = L.latLng(pontos[(i + 1) % pontos.length]); // Próximo ponto (fecha o ciclo)
+            
+            const dist = p1.distanceTo(p2);
+            const midpoint = [ (p1.lat + p2.lat)/2, (p1.lng + p2.lng)/2 ];
+
+            // Desenha a linha da aresta
+            L.polyline([p1, p2], {color: '#d32f2f', weight: 4}).addTo(map);
+
+            // Adiciona o rótulo da medida no meio da aresta
+            L.marker(midpoint, {
+                icon: L.divIcon({
+                    className: 'edge-label',
+                    html: `${dist.toFixed(2)}m`,
+                    iconSize: [60, 20],
+                    iconAnchor: [30, 10]
+                })
+            }).addTo(map);
+
+            htmlMetrics += `Aresta ${i+1}: <b>${dist.toFixed(2)}m</b><br>`;
+        }
+        document.getElementById('metrics').innerHTML = htmlMetrics;
+    }
+
+    // Desenha o polígono simplificado com preenchimento
+    L.polygon(quadrilatero, {
+        color: 'transparent',
+        fillColor: '#d32f2f',
+        fillOpacity: 0.1
+    }).addTo(map);
+
+    desenharArestas(quadrilatero);
+
+</script>
+</body>
+</html>

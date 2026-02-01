@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Coordenadas Originais GEO</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        #map { height: 100vh; width: 100vw; background: #ffffff; }
+
+        .floating-panel {
+            position: absolute; top: 15px; left: 50px; z-index: 1000;
+            background: white; padding: 15px; border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15); border-top: 5px solid #28a745;
+            width: 300px;
+        }
+
+        .lote-label {
+            background: rgba(255, 255, 255, 0.85); border: 1px solid #333;
+            padding: 2px 5px; border-radius: 3px; font-size: 10px;
+            font-weight: bold; color: #000; text-align: center;
+        }
+
+        .btn-tool {
+            background: #f1f3f4; color: #3c4043; border: 1px solid #dadce0;
+            padding: 8px; border-radius: 6px; cursor: pointer; width: 100%;
+            margin-top: 8px; font-weight: 500; font-size: 0.85em;
+        }
+        
+        .btn-active { background: #28a745 !important; color: white !important; }
+        
+        .tooltip-medicao {
+            background: #202124; color: white; padding: 4px 8px;
+            border-radius: 4px; font-size: 11px; font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div class="floating-panel">
+    <strong style="font-size: 1.1em;">Quadra GEO - Orientação Original</strong><br>
+    <small style="color: #666;">Sem Rotação | Norte Real</small>
+    
+    <div style="margin: 10px 0;">
+        <input type="file" id="csvFile" accept=".csv" style="font-size: 0.8em; width: 100%;">
+    </div>
+
+    <button id="btnRegua" class="btn-tool" onclick="toggleRegua()">📏 Régua de Medição</button>
+    <button class="btn-tool" onclick="limparMedicao()">🗑️ Limpar Medição</button>
+    <button class="btn-tool" style="background: #1a73e8; color: white;" onclick="exportarTabela()">📊 Exportar Dimensões</button>
+    
+    <div id="status" style="font-size: 0.8em; margin-top: 10px; color: #28a745; font-weight: bold;"></div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+    // Centroide da Quadra 0054 para focar o mapa inicialmente
+    const centroRef = [-25.68070, -53.80205];
+    let dadosLotes = [];
+    
+    const map = L.map('map', { zoomControl: true, attributionControl: false }).setView(centroRef, 19);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21 }).addTo(map);
+
+    // Escala Gráfica
+    L.control.scale({ imperial: false, position: 'bottomright' }).addTo(map);
+
+    let camadaGeometria = L.layerGroup().addTo(map);
+    let camadaMedicao = L.layerGroup().addTo(map);
+
+    // --- FERRAMENTA DE MEDIÇÃO ---
+    let modoMedicao = false;
+    let pontoA = null;
+    let linhaGuia = null;
+    let labelGuia = null;
+
+    function toggleRegua() {
+        modoMedicao = !modoMedicao;
+        const btn = document.getElementById('btnRegua');
+        if(modoMedicao) {
+            btn.classList.add('btn-active');
+            btn.innerText = "📍 Clique no mapa para o Ponto A";
+            map.getContainer().style.cursor = 'crosshair';
+        } else {
+            finalizarMedicaoModo();
+        }
+    }
+
+    function finalizarMedicaoModo() {
+        modoMedicao = false;
+        pontoA = null;
+        if(linhaGuia) map.removeLayer(linhaGuia);
+        if(labelGuia) map.removeLayer(labelGuia);
+        const btn = document.getElementById('btnRegua');
+        btn.classList.remove('btn-active');
+        btn.innerText = "📏 Régua de Medição";
+        map.getContainer().style.cursor = '';
+    }
+
+    map.on('click', (e) => {
+        if (!modoMedicao) return;
+        if (!pontoA) {
+            pontoA = e.latlng;
+            L.circleMarker(pontoA, { radius: 4, color: '#202124' }).addTo(camadaMedicao);
+            document.getElementById('btnRegua').innerText = "📍 Clique para o Ponto B";
+        } else {
+            const dist = map.distance(pontoA, e.latlng);
+            L.polyline([pontoA, e.latlng], { color: '#202124', weight: 2, dashArray: '5, 5' }).addTo(camadaMedicao);
+            L.marker(e.latlng, {
+                icon: L.divIcon({ className: 'tooltip-medicao', html: dist.toFixed(2) + " m", iconAnchor: [-10, 10] })
+            }).addTo(camadaMedicao);
+            finalizarMedicaoModo();
+        }
+    });
+
+    map.on('mousemove', (e) => {
+        if (modoMedicao && pontoA) {
+            const dist = map.distance(pontoA, e.latlng);
+            if (linhaGuia) map.removeLayer(linhaGuia);
+            if (labelGuia) map.removeLayer(labelGuia);
+            linhaGuia = L.polyline([pontoA, e.latlng], { color: '#28a745', weight: 2, opacity: 0.6 }).addTo(map);
+            labelGuia = L.marker(e.latlng, {
+                icon: L.divIcon({ className: 'tooltip-medicao', html: dist.toFixed(2) + " m", iconAnchor: [-10, 10] })
+            }).addTo(map);
+        }
+    });
+
+    function limparMedicao() { camadaMedicao.clearLayers(); finalizarMedicaoModo(); }
+
+    // --- PROCESSAMENTO DO CSV (SEM ROTAÇÃO) ---
+
+    document.getElementById('csvFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        Papa.parse(file, {
+            header: true,
+            complete: function(results) {
+                camadaGeometria.clearLayers();
+                dadosLotes = [];
+                
+                results.data.forEach(linha => {
+                    if (!linha.geometria) return;
+                    const matches = linha.geometria.match(/-?\d+\.\d+/g);
+                    if (!matches) return;
+
+                    let coords = [];
+                    for (let i = 0; i < matches.length; i += 2) {
+                        // Respeitando estritamente a ordem do CSV: Lon Lat -> Lat Lon
+                        coords.push([parseFloat(matches[i+1]), parseFloat(matches[i])]);
+                    }
+
+                    // Cálculo de dimensões reais
+                    let lados = [];
+                    for(let i=0; i<coords.length-1; i++) {
+                        lados.push(map.distance(coords[i], coords[i+1]));
+                    }
+                    lados.sort((a,b) => a-b);
+                    const testada = lados.find(l => l > 1) || lados[0];
+                    const profundidade = lados[lados.length - 1];
+
+                    dadosLotes.push({ id: linha.codigo_cartografico, t: testada.toFixed(2), p: profundidade.toFixed(2) });
+
+                    // Desenha o polígono original
+                    L.polygon(coords, { color: '#333', weight: 1.5, fillColor: '#28a745', fillOpacity: 0.3 }).addTo(camadaGeometria);
+
+                    // Label no centroide original
+                    const centroLote = L.polygon(coords).getBounds().getCenter();
+                    L.marker(centroLote, {
+                        icon: L.divIcon({
+                            className: 'lote-label',
+                            html: `${linha.codigo_cartografico.split('.').pop()}<br>${testada.toFixed(1)}x${profundidade.toFixed(1)}m`,
+                            iconSize: [65, 25]
+                        })
+                    }).addTo(camadaGeometria);
+                });
+
+                // Ponto vermelho no centro da quadra (centro geográfico real dos dados)
+                L.circleMarker(centroRef, { color: 'red', radius: 6, fillOpacity: 1 }).addTo(camadaGeometria);
+                map.setView(centroRef, 19);
+                document.getElementById('status').innerText = `${dadosLotes.length} lotes mapeados.`;
+            }
+        });
+    });
+
+    function exportarTabela() {
+        if (dadosLotes.length === 0) return alert("Carregue o CSV primeiro!");
+        let csv = "Codigo;Testada_m;Profundidade_m\n" + dadosLotes.map(d => `${d.id};${d.t};${d.p}`).join("\n");
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const a = document.createElement('a');
+        a.href = window.URL.createObjectURL(blob);
+        a.download = 'Dimensoes_Originais_Quadra_0054.csv';
+        a.click();
+    }
+</script>
+</body>
+</html>

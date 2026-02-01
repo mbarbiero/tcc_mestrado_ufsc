@@ -1,6 +1,6 @@
 const fs = require('fs');
 
-const inputFile = 'Capanema.csv';
+const inputFile = 'Cadurb - Capanema.csv';
 const outputFile = 'dados_normalizados.json';
 
 // Lendo o arquivo
