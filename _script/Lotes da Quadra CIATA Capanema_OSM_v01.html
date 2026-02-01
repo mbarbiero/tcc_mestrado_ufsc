@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Quadra 0054 - Capanema PR</title>
+    <title>Quadra 0054 Ajustada com OSM</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', sans-serif; background-color: #f8f9fa; overflow: hidden; width: 100vw; height: 100vh; }
@@ -12,38 +12,48 @@
         .lote:hover { fill: #1a73e8 !important; stroke: #0d47a1; stroke-width: 2.5; }
         
         .lote-text { font-size: 14px; fill: #0d47a1; font-weight: 900; pointer-events: none; text-anchor: middle; }
-        .dim-text-inner { font-size: 11px; fill: #37474f; font-weight: bold; pointer-events: none; text-anchor: middle; }
+        .dim-text-inner { font-size: 10px; fill: #546e7a; font-weight: bold; pointer-events: none; text-anchor: middle; }
+        .num-predial { font-size: 9px; fill: #e53935; font-weight: bold; pointer-events: none; }
         
         .quadra-dim-total { font-size: 14px; fill: #d35400; font-weight: 800; text-anchor: middle; }
-        
-        /* Estilo para os nomes das ruas */
         .rua-label { font-size: 12px; fill: #78909c; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; text-anchor: middle; }
 
-        g:hover .lote-text, g:hover .dim-text-inner { fill: #ffffff !important; }
+        /* A quadra gira, mas a bússola e o título não */
+        #mainGroup {
+            transform: rotate(345deg);
+            transform-origin: center center;
+        }
 
         .tooltip {
             position: absolute; padding: 12px; background: rgba(32, 33, 36, 0.98);
-            color: white; border-radius: 8px; font-size: 15px; display: none; 
-            pointer-events: none; z-index: 1000; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            border: 1px solid #1a73e8; line-height: 1.4;
+            color: white; border-radius: 8px; font-size: 14px; display: none; 
+            z-index: 1000; box-shadow: 0 4px 20px rgba(0,0,0,0.4); border: 1px solid #1a73e8;
         }
 
         .header-institucional {
-            position: absolute; top: 0; left: 0; width: 100%; padding: 20px;
+            position: absolute; top: 0; left: 0; width: 100%; padding: 15px;
             text-align: center; background: white; border-bottom: 1px solid #e0e0e0;
-            pointer-events: none; z-index: 10;
+            z-index: 10;
         }
     </style>
 </head>
 <body>
 
 <div class="header-institucional">
-    <h1 style="color: #263238; font-size: 20px; margin-bottom: 2px;">Quadra 0054</h1>
+    <h1 style="color: #263238; font-size: 20px;">Quadra 0054 Ajustada com OSM</h1>
     <p style="color: #1a73e8; font-weight: 600; font-size: 13px;">Capanema - PR - 2026</p>
 </div>
 
 <div id="tooltip" class="tooltip"></div>
-<svg id="quadraSvg"></svg>
+
+<svg id="quadraSvg">
+    <g id="mainGroup"></g>
+    
+    <g id="rosaVentos">
+        <circle r="35" fill="white" stroke="#cfd8dc" stroke-width="1" fill-opacity="0.8"/>
+        <path d="M0 -30 L8 0 L0 -4 L-8 0 Z" fill="#d32f2f" /> <path d="M0 30 L8 0 L0 -4 L-8 0 Z" fill="#263238" /> <path d="M30 0 L0 8 L4 0 L0 -8 Z" fill="#455a64" /> <path d="M-30 0 L0 8 L-4 0 L0 -8 Z" fill="#455a64" /> <text y="-38" font-size="14" font-weight="bold" text-anchor="middle" fill="#263238">N</text>
+    </g>
+</svg>
 
 <script>
     const dadosCsv = `COD_MUNICIPIO;COD_UNICO_ENDERECO;ID_QUADRA;NOM_LOGRADOURO;NUM_ENDERECO;NOM_LOGRADOURO_ADJACENTE;DIM_TESTADA;DIM_PROFUNDIDADE
@@ -72,43 +82,58 @@
             return { id: c[1], rua: c[3].trim(), num: c[4].trim(), adj: c[5].trim(), t: parseFloat(c[6]), p: parseFloat(c[7]) };
         });
 
-        const svg = document.getElementById('quadraSvg');
-        const tooltip = document.getElementById('tooltip');
+        const mainGroup = document.getElementById('mainGroup');
+        const rosa = document.getElementById('rosaVentos');
         
-        const ESC = 6.2; 
-        const OFF_X = (window.innerWidth / 2) - (55 * ESC);
-        const OFF_Y = (window.innerHeight / 2) - (60 * ESC) + 65;
+        // Posiciona a Rosa dos Ventos no canto inferior direito
+        rosa.setAttribute("transform", `translate(${window.innerWidth - 80}, ${window.innerHeight - 80})`);
 
-        function drawLote(x, y, w, h, info) {
-            const displayTestada = info.adj ? info.t + info.p : info.t;
+        const ESC = 6.0; 
+        const OFF_X = (window.innerWidth / 2) - (55 * ESC);
+        const OFF_Y = (window.innerHeight / 2) - (60 * ESC) + 60;
+
+        function drawLote(x, y, w, h, info, orientation) {
             const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
             const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
             rect.setAttribute("x", x); rect.setAttribute("y", y);
             rect.setAttribute("width", w); rect.setAttribute("height", h);
             rect.setAttribute("class", "lote");
 
-            rect.addEventListener('mouseover', () => {
-                tooltip.style.display = 'block';
-                tooltip.innerHTML = `<strong>${info.rua}, ${info.num}</strong><br>Inscrição: ${info.id.split('.').pop()}`;
-            });
-            rect.addEventListener('mousemove', (e) => {
-                tooltip.style.left = (e.clientX + 15) + 'px';
-                tooltip.style.top = (e.clientY + 15) + 'px';
-            });
-            rect.addEventListener('mouseout', () => tooltip.style.display = 'none');
+            const area = info.t * info.p;
+
+            rect.onmouseover = (e) => {
+                const tt = document.getElementById('tooltip');
+                tt.style.display = 'block';
+                tt.innerHTML = `<strong>${info.rua}, ${info.num}</strong><br>
+                                Área: ${area.toFixed(2)} m²<br>
+                                Insc: ${info.id.split('.').pop()}`;
+            };
+            rect.onmousemove = (e) => {
+                const tt = document.getElementById('tooltip');
+                tt.style.left = (e.clientX + 10) + 'px'; tt.style.top = (e.clientY + 10) + 'px';
+            };
+            rect.onmouseout = () => document.getElementById('tooltip').style.display = 'none';
 
             const tId = document.createElementNS("http://www.w3.org/2000/svg", "text");
-            tId.setAttribute("x", x + w/2); tId.setAttribute("y", y + h/2 - 4);
+            tId.setAttribute("x", x + w/2); tId.setAttribute("y", y + h/2 - 2);
             tId.setAttribute("class", "lote-text");
             tId.textContent = info.id.split('.').pop();
 
             const tDim = document.createElementNS("http://www.w3.org/2000/svg", "text");
-            tDim.setAttribute("x", x + w/2); tDim.setAttribute("y", y + h/2 + 14);
+            tDim.setAttribute("x", x + w/2); tDim.setAttribute("y", y + h/2 + 12);
             tDim.setAttribute("class", "dim-text-inner");
-            tDim.textContent = `${displayTestada}x${info.p}`;
+            tDim.textContent = `${info.t}x${info.p}`;
 
-            g.appendChild(rect); g.appendChild(tId); g.appendChild(tDim);
-            svg.appendChild(g);
+            const nP = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            nP.setAttribute("class", "num-predial");
+            if(orientation === 'N') { nP.setAttribute("x", x + 2); nP.setAttribute("y", y + 10); }
+            else if(orientation === 'S') { nP.setAttribute("x", x + 2); nP.setAttribute("y", y + h - 3); }
+            else if(orientation === 'W') { nP.setAttribute("x", x + 2); nP.setAttribute("y", y + 10); }
+            else { nP.setAttribute("x", x + w - 22); nP.setAttribute("y", y + 10); }
+            nP.textContent = info.num;
+
+            g.appendChild(rect); g.appendChild(tId); g.appendChild(tDim); g.appendChild(nP);
+            mainGroup.appendChild(g);
         }
 
         const l010A = lotes.find(l => l.id.endsWith('.010A'));
@@ -117,68 +142,52 @@
 
         let curX = OFF_X;
         lotes.filter(l => l.rua === 'AV. PARANA').sort((a,b) => b.num - a.num).forEach(l => {
-            drawLote(curX, OFF_Y, l.t * ESC, l.p * ESC, l);
+            drawLote(curX, OFF_Y, l.t * ESC, l.p * ESC, l, 'N');
             curX += l.t * ESC;
         });
 
         let curY = OFF_Y + (l010A.p * ESC);
         ['.0100', '.0800', '.0300'].forEach(sfx => {
             const l = lotes.find(item => item.id.endsWith(sfx));
-            if(l) {
-                drawLote(OFF_X, curY, l.p * ESC, l.t * ESC, l);
-                curY += l.t * ESC;
-            }
+            if(l) { drawLote(OFF_X, curY, l.p * ESC, l.t * ESC, l, 'W'); curY += l.t * ESC; }
         });
 
         const posX_Leste = curX; 
         let curY_Leste = OFF_Y + (l0200.p * ESC);
         ['.020A', '.0900', '.040A', '.04AA'].forEach(sfx => {
             const l = lotes.find(item => item.id.endsWith(sfx));
-            if(l) {
-                drawLote(posX_Leste - (l.p * ESC), curY_Leste, l.p * ESC, l.t * ESC, l);
-                curY_Leste += l.t * ESC;
-            }
+            if(l) { drawLote(posX_Leste - (l.p * ESC), curY_Leste, l.p * ESC, l.t * ESC, l, 'E'); curY_Leste += l.t * ESC; }
         });
 
         let sulX = OFF_X + (l0300.p * ESC);
         lotes.filter(l => l.rua === 'RUA SANTA CATARINA' && !l.id.endsWith('.0400'))
              .sort((a,b) => b.num - a.num).forEach(l => {
-                drawLote(sulX, curY - (l.p * ESC), l.t * ESC, l.p * ESC, l);
-                sulX += l.t * ESC;
+                drawLote(sulX, curY - (l.p * ESC), l.t * ESC, l.p * ESC, l, 'S'); sulX += l.t * ESC;
              });
 
         const l0400 = lotes.find(l => l.id.endsWith('.0400'));
-        drawLote(posX_Leste - (l0400.t * ESC), curY - (l0400.p * ESC), l0400.t * ESC, l0400.p * ESC, l0400);
+        drawLote(posX_Leste - (l0400.t * ESC), curY - (l0400.p * ESC), l0400.t * ESC, l0400.p * ESC, l0400, 'S');
 
-        // --- COTAS E LABELS DE RUAS ---
         const realW = curX - OFF_X; const realH = curY - OFF_Y;
         function drawLabel(x, y, txt, cls, rot = 0) {
             const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
             t.setAttribute("class", cls);
             if(rot !== 0) t.setAttribute("transform", `translate(${x},${y}) rotate(${rot})`);
             else { t.setAttribute("x", x); t.setAttribute("y", y); }
-            t.textContent = txt; svg.appendChild(t);
+            t.textContent = txt; mainGroup.appendChild(t);
         }
-
-        // Norte (Av. Paraná)
-        drawLabel(OFF_X + realW/2, OFF_Y - 25, `${(realW/ESC).toFixed(2)}m`, "quadra-dim-total");
-        drawLabel(OFF_X + realW/2, OFF_Y - 45, "Av. Paraná", "rua-label");
-
-        // Sul (Rua Santa Catarina)
-        drawLabel(OFF_X + realW/2, curY + 35, `${(realW/ESC).toFixed(2)}m`, "quadra-dim-total");
-        drawLabel(OFF_X + realW/2, curY + 55, "Rua Santa Catarina", "rua-label");
-
-        // Oeste (Av. Ubirajaras)
+        drawLabel(OFF_X + realW/2, OFF_Y - 15, `${(realW/ESC).toFixed(2)}m`, "quadra-dim-total");
+        drawLabel(OFF_X + realW/2, OFF_Y - 35, "Av. Paraná", "rua-label");
+        drawLabel(OFF_X + realW/2, curY + 30, `${(realW/ESC).toFixed(2)}m`, "quadra-dim-total");
+        drawLabel(OFF_X + realW/2, curY + 50, "Rua Santa Catarina", "rua-label");
         drawLabel(OFF_X - 45, OFF_Y + realH/2, `${(realH/ESC).toFixed(2)}m`, "quadra-dim-total", -90);
         drawLabel(OFF_X - 65, OFF_Y + realH/2, "Av. Ubirajaras", "rua-label", -90);
-
-        // Leste (Rua Caramurus)
         drawLabel(posX_Leste + 55, OFF_Y + realH/2, `${(realH/ESC).toFixed(2)}m`, "quadra-dim-total", 90);
         drawLabel(posX_Leste + 75, OFF_Y + realH/2, "Rua Caramurus", "rua-label", 90);
     }
 
     window.onload = render;
-    window.onresize = () => { svg.innerHTML = ''; render(); };
+    window.onresize = () => { document.getElementById('mainGroup').innerHTML = ''; render(); };
 </script>
 </body>
 </html>
