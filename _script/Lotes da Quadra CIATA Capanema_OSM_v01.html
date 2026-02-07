@@ -18,9 +18,9 @@
         .quadra-dim-total { font-size: 14px; fill: #d35400; font-weight: 800; text-anchor: middle; }
         .rua-label { font-size: 12px; fill: #78909c; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; text-anchor: middle; }
 
-        /* A quadra gira, mas a bússola e o título não */
+        /* GIRO DE 15 GRAUS SOLICITADO */
         #mainGroup {
-            transform: rotate(345deg);
+            transform: rotate(15deg);
             transform-origin: center center;
         }
 
@@ -50,8 +50,12 @@
     <g id="mainGroup"></g>
     
     <g id="rosaVentos">
-        <circle r="35" fill="white" stroke="#cfd8dc" stroke-width="1" fill-opacity="0.8"/>
-        <path d="M0 -30 L8 0 L0 -4 L-8 0 Z" fill="#d32f2f" /> <path d="M0 30 L8 0 L0 -4 L-8 0 Z" fill="#263238" /> <path d="M30 0 L0 8 L4 0 L0 -8 Z" fill="#455a64" /> <path d="M-30 0 L0 8 L-4 0 L0 -8 Z" fill="#455a64" /> <text y="-38" font-size="14" font-weight="bold" text-anchor="middle" fill="#263238">N</text>
+        <circle r="25" fill="white" stroke="#cfd8dc" stroke-width="1" fill-opacity="0.9"/>
+        <path d="M0 -22 L6 0 L0 -3 L-6 0 Z" fill="#d32f2f" />
+        <path d="M0 22 L6 0 L0 -3 L-6 0 Z" fill="#263238" />
+        <path d="M22 0 L0 6 L3 0 L0 -6 Z" fill="#455a64" />
+        <path d="M-22 0 L0 6 L-3 0 L0 -6 Z" fill="#455a64" />
+        <text y="-28" font-size="11" font-weight="bold" text-anchor="middle" fill="#263238">N</text>
     </g>
 </svg>
 
@@ -84,11 +88,8 @@
 
         const mainGroup = document.getElementById('mainGroup');
         const rosa = document.getElementById('rosaVentos');
-        
-        // Posiciona a Rosa dos Ventos no canto inferior direito
-        rosa.setAttribute("transform", `translate(${window.innerWidth - 80}, ${window.innerHeight - 80})`);
-
         const ESC = 6.0; 
+        
         const OFF_X = (window.innerWidth / 2) - (55 * ESC);
         const OFF_Y = (window.innerHeight / 2) - (60 * ESC) + 60;
 
@@ -99,14 +100,10 @@
             rect.setAttribute("width", w); rect.setAttribute("height", h);
             rect.setAttribute("class", "lote");
 
-            const area = info.t * info.p;
-
             rect.onmouseover = (e) => {
                 const tt = document.getElementById('tooltip');
                 tt.style.display = 'block';
-                tt.innerHTML = `<strong>${info.rua}, ${info.num}</strong><br>
-                                Área: ${area.toFixed(2)} m²<br>
-                                Insc: ${info.id.split('.').pop()}`;
+                tt.innerHTML = `<strong>${info.rua}, ${info.num}</strong><br>Área: ${(info.t * info.p).toFixed(2)} m²`;
             };
             rect.onmousemove = (e) => {
                 const tt = document.getElementById('tooltip');
@@ -136,38 +133,38 @@
             mainGroup.appendChild(g);
         }
 
+        // Lógica de Lotes (Igual à anterior)
         const l010A = lotes.find(l => l.id.endsWith('.010A'));
         const l0300 = lotes.find(l => l.id.endsWith('.0300'));
         const l0200 = lotes.find(l => l.id.endsWith('.0200'));
 
         let curX = OFF_X;
         lotes.filter(l => l.rua === 'AV. PARANA').sort((a,b) => b.num - a.num).forEach(l => {
-            drawLote(curX, OFF_Y, l.t * ESC, l.p * ESC, l, 'N');
-            curX += l.t * ESC;
+            drawLote(curX, OFF_Y, l.t * ESC, l.p * ESC, l, 'N'); curX += l.t * ESC;
         });
-
         let curY = OFF_Y + (l010A.p * ESC);
         ['.0100', '.0800', '.0300'].forEach(sfx => {
             const l = lotes.find(item => item.id.endsWith(sfx));
             if(l) { drawLote(OFF_X, curY, l.p * ESC, l.t * ESC, l, 'W'); curY += l.t * ESC; }
         });
-
         const posX_Leste = curX; 
         let curY_Leste = OFF_Y + (l0200.p * ESC);
         ['.020A', '.0900', '.040A', '.04AA'].forEach(sfx => {
             const l = lotes.find(item => item.id.endsWith(sfx));
             if(l) { drawLote(posX_Leste - (l.p * ESC), curY_Leste, l.p * ESC, l.t * ESC, l, 'E'); curY_Leste += l.t * ESC; }
         });
-
         let sulX = OFF_X + (l0300.p * ESC);
         lotes.filter(l => l.rua === 'RUA SANTA CATARINA' && !l.id.endsWith('.0400'))
              .sort((a,b) => b.num - a.num).forEach(l => {
                 drawLote(sulX, curY - (l.p * ESC), l.t * ESC, l.p * ESC, l, 'S'); sulX += l.t * ESC;
              });
-
         const l0400 = lotes.find(l => l.id.endsWith('.0400'));
         drawLote(posX_Leste - (l0400.t * ESC), curY - (l0400.p * ESC), l0400.t * ESC, l0400.p * ESC, l0400, 'S');
 
+        // POSICIONAMENTO DA ROSA DOS VENTOS (Ajustado para o giro de 15°)
+        rosa.setAttribute("transform", `translate(${posX_Leste + 100}, ${curY - 20})`);
+
+        // Labels
         const realW = curX - OFF_X; const realH = curY - OFF_Y;
         function drawLabel(x, y, txt, cls, rot = 0) {
             const t = document.createElementNS("http://www.w3.org/2000/svg", "text");

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SC_ Dashboard de Erro Quadrático</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { margin: 0; background: #f0f2f5; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; height: 100vh; }
+        header { background: #007bff; color: white; padding: 1rem; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .main-content { display: flex; flex: 1; padding: 20px; gap: 20px; overflow: hidden; }
+        #map { flex: 2; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); background: white; }
+        .stats-panel { flex: 1; display: flex; flex-direction: column; gap: 20px; }
+        .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        .rmse-value { font-size: 28px; font-weight: bold; color: #28a745; text-align: center; margin: 10px 0; }
+        .chart-container { position: relative; height: 220px; }
+        h3 { margin-top: 0; font-size: 14px; color: #555; text-transform: uppercase; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Análise de Precisão: Quadra Ajustada vs Oficial</h1>
+</header>
+
+<div class="main-content">
+    <div id="map"></div>
+
+    <div class="stats-panel">
+        <div class="card">
+            <h3>Erro Quadrático Médio (RMSE)</h3>
+            <div class="rmse-value">1.95 m</div>
+            <p style="font-size: 11px; color: #888; text-align: center;">Resultado obtido após reordenamento topológico dos vértices.</p>
+        </div>
+
+        <div class="card">
+            <h3>Dispersão de Resíduos (m)</h3>
+            <div class="chart-container">
+                <canvas id="errorChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card" style="font-size: 11px; flex-grow: 1; overflow-y: auto;">
+            <h3>Log de Desvios Lineares</h3>
+            <div id="log-errors"></div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // Pares correlacionados geograficamente
+    const ajustada = [
+        {id: "V1", lat: -25.6801397, lng: -53.8021866},
+        {id: "V2", lat: -25.6803797, lng: -53.801226},
+        {id: "V3", lat: -25.6813319, lng: -53.801519},
+        {id: "V4", lat: -25.6810919, lng: -53.8024796}
+    ];
+
+    const oficial = [
+        {id: "V2_of", lat: -25.68013, lng: -53.80217},
+        {id: "V3_of", lat: -25.68037, lng: -53.80121},
+        {id: "V4_of", lat: -25.68133, lng: -53.80150},
+        {id: "V1_of", lat: -25.68109, lng: -53.80246}
+    ];
+
+    const map = L.map('map', {zoomControl: false}).setView([-25.6807, -53.8018], 19);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    const mLat = 111320;
+    const mLon = 100321;
+    const errorData = [];
+    let htmlLog = "";
+
+    ajustada.forEach((p, i) => {
+        const dLat = (p.lat - oficial[i].lat) * mLat;
+        const dLng = (p.lng - oficial[i].lng) * mLon;
+        const dist = Math.sqrt(dLat*dLat + dLng*dLng);
+        
+        errorData.push({x: dLng, y: dLat});
+        htmlLog += `<b>Ponto ${i+1}:</b> Δx: ${dLng.toFixed(2)}m | Δy: ${dLat.toFixed(2)}m | <b>Dist: ${dist.toFixed(2)}m</b><br>`;
+
+        L.circleMarker([oficial[i].lat, oficial[i].lng], {radius: 4, color: '#333'}).addTo(map);
+        L.circleMarker([p.lat, p.lng], {radius: 4, color: '#007bff'}).addTo(map);
+        L.polyline([[oficial[i].lat, oficial[i].lng], [p.lat, p.lng]], {color: 'red', weight: 1, dashArray: '3,3'}).addTo(map);
+    });
+
+    document.getElementById('log-errors').innerHTML = htmlLog;
+
+    
+
+    new Chart(document.getElementById('errorChart'), {
+        type: 'scatter',
+        data: {
+            datasets: [{
+                label: 'Vetor de Erro',
+                data: errorData,
+                backgroundColor: '#007bff'
+            }]
+        },
+        options: {
+            scales: {
+                x: { title: {display: true, text: 'Erro Longitude (m)'}, min: -3, max: 3 },
+                y: { title: {display: true, text: 'Erro Latitude (m)'}, min: -3, max: 3 }
+            },
+            maintainAspectRatio: false
+        }
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SC_ Quadra ajustada com OSM</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+        }
+
+        #map-container {
+            width: 800px;
+            height: 600px;
+            position: relative;
+            border: 2px solid #ccc;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            background: white;
+            overflow: hidden;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        .info-panel {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            z-index: 1001;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 5px solid #ff7800;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .info-panel h2 {
+            margin: 0 0 5px 0;
+            font-size: 14px;
+            color: #333;
+            text-transform: uppercase;
+        }
+
+        .info-panel p {
+            margin: 3px 0;
+            font-size: 11px;
+            color: #555;
+        }
+
+        .note {
+            margin-top: 8px;
+            font-size: 10px;
+            color: #888;
+            font-style: italic;
+        }
+
+        .coords-list {
+            background: #f8f9fa;
+            padding: 8px;
+            border: 1px solid #ddd;
+            margin-top: 10px;
+            max-height: 120px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 10px;
+        }
+
+        .btn-export {
+            margin-top: 10px;
+            width: 100%;
+            padding: 8px;
+            background: #ff7800;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="map-container">
+        <div class="info-panel">
+            <h2>SC_ Quadra ajustada com OSM</h2>
+            <p><strong>Município:</strong> 4104501 - Capanema - PR</p>
+            <p><strong>SC_:</strong> ["1558A9D1","9003F37C","F0D334EC","F54DE0AF"]</p>
+            <p><strong>CI_:</strong> 01.03.002.3.0054</p>
+            <p><strong>CN_:</strong> 410450105000001P012</p>
+            <div class="note">Face de ajuste OSM: Avenida Paraná - 15.5° Horário.</div>
+            <div id="vertex-display" class="coords-list"></div>
+            <button class="btn-export" onclick="exportarJSON()">EXPORTAR JSON</button>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const centroMapa = [-25.68070, -53.80205];
+        const pivôFace0 = [-25.68023275, -53.80173725];
+        const dimX = 100; // Face 0 (Avenida Paraná)
+        const dimY = 110; // Face 1 (Rua Caramurus)
+        const angulo = 15.5; // Rotação solicitada
+
+        // Inicialização do Mapa
+        const map = L.map('map', {
+            maxZoom: 19,
+            minZoom: 19,
+            zoomControl: false,
+            dragging: false,
+            scrollWheelZoom: false,
+            doubleClickZoom: false,
+            touchZoom: false,
+            attributionControl: false
+        }).setView(centroMapa, 19);
+
+        // Camada OSM (Garante o carregamento)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19
+        }).addTo(map);
+
+        // Forçar o Leaflet a recalcular o tamanho do mapa após o carregamento
+        setTimeout(() => { map.invalidateSize(); }, 200);
+
+        let verticesFinais = [];
+
+        function processarGeometria() {
+            const rad = (angulo * Math.PI) / 180;
+
+            // Conversão local para Capanema (metros para graus)
+            const mLat = 111320;
+            const mLon = 111320 * Math.cos(pivôFace0[0] * Math.PI / 180);
+
+            // 1. Criar retângulo perfeito em metros (Local)
+            // O pivô (0,0) é o centro da Face 0
+            const baseMetros = [
+                { id: "V1", x: -dimX / 2, y: 0 },      // Noroeste
+                { id: "V2", x: dimX / 2, y: 0 },      // Nordeste
+                { id: "V3", x: dimX / 2, y: -dimY },   // Sudeste
+                { id: "V4", x: -dimX / 2, y: -dimY }    // Sudoeste
+            ];
+
+            let html = "";
+            verticesFinais = baseMetros.map(p => {
+                // 2. Girar em metros (Matriz de rotação horária)
+                const rx = p.x * Math.cos(rad) + p.y * Math.sin(rad);
+                const ry = -p.x * Math.sin(rad) + p.y * Math.cos(rad);
+
+                // 3. Converter para Coordenadas Geográficas somando ao pivô
+                const lat = parseFloat((pivôFace0[0] + (ry / mLat)).toFixed(5));
+                const lng = parseFloat((pivôFace0[1] + (rx / mLon)).toFixed(5));
+
+                html += `<b>${p.id}:</b> ${lat}, ${lng}<br>`;
+                return { id: p.id, lat, lng };
+            });
+
+            document.getElementById('vertex-display').innerHTML = html;
+
+            // Desenhar Polígono Laranja
+            const pts = verticesFinais.map(v => [v.lat, v.lng]);
+            L.polygon(pts, { color: '#ff7800', fillColor: '#ff7800', fillOpacity: 0.25, weight: 3 }).addTo(map);
+
+            // Adicionar nós nos vértices
+            verticesFinais.forEach(v => {
+                L.circleMarker([v.lat, v.lng], { radius: 3, color: '#ff7800', fillOpacity: 1 }).addTo(map);
+            });
+        }
+
+        function exportarJSON() {
+            const data = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(verticesFinais, null, 2));
+            const link = document.createElement('a');
+            link.setAttribute("href", data);
+            link.setAttribute("download", "sc_quadra_ajustada_15.json");
+            link.click();
+        }
+
+        processarGeometria();
+    </script>
+</body>
+
+</html>

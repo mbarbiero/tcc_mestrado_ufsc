@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SC_ Comparativo Técnico de Erro</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; background-color: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        #map-container { width: 800px; height: 600px; position: relative; border: 2px solid #ccc; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); background: white; overflow: hidden; }
+        #map { width: 100%; height: 100%; }
+        .info-panel { position: absolute; top: 15px; left: 15px; z-index: 1001; background: rgba(255, 255, 255, 0.95); padding: 15px; border-radius: 4px; border-left: 5px solid #ff7800; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); width: 280px; }
+        .info-panel h2 { margin: 0 0 5px 0; font-size: 14px; color: #333; text-transform: uppercase; }
+        .info-panel p { margin: 3px 0; font-size: 11px; color: #555; }
+        .coords-list { background: #f8f9fa; padding: 8px; border: 1px solid #ddd; margin-top: 10px; max-height: 120px; overflow-y: auto; font-family: monospace; font-size: 10px; }
+        .btn-export { margin-top: 10px; width: 100%; padding: 8px; background: #ff7800; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px; font-weight: bold; }
+    </style>
+</head>
+<body>
+<div id="map-container">
+    <div class="info-panel">
+        <h2>SC_ Análise de Precisão</h2>
+        <p><strong>Município:</strong> Capanema - PR</p>
+        <p><strong>Erro Médio Real:</strong> 5.76 metros</p>
+        <p style="font-size: 9px; color: #888;">* Vértices pareados por proximidade espacial.</p>
+        <div id="vertex-display" class="coords-list">
+            Noroeste: 6.03m<br>
+            Nordeste: 5.49m<br>
+            Sudeste: 5.49m<br>
+            Sudoeste: 6.03m
+        </div>
+        <button class="btn-export" onclick="exportarJSON()">EXPORTAR RELATÓRIO</button>
+    </div>
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([-25.68070, -53.80185], 19);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    // Dados Originais CIATA (Referência)
+    const geo_quadra = [
+        [-25.68109, -53.80246], [-25.68013, -53.80217], [-25.68037, -53.80121], [-25.68133, -53.80150]
+    ];
+    // Dados Ajustados 15° OSM (Reordenados para o V1 ser o ponto Noroeste correspondente)
+    const sc_ajustada = [
+        [-25.68106, -53.80251], [-25.68011, -53.80222], [-25.68035, -53.80126], [-25.68130, -53.80155]
+    ];
+
+    L.polygon(geo_quadra, {color: '#666', weight: 2, dashArray: '5, 5', fillOpacity: 0.1}).addTo(map);
+    L.polygon(sc_ajustada, {color: '#ff7800', weight: 3, fillOpacity: 0.2}).addTo(map);
+
+    // Linhas de Erro Curtas (agora visíveis pois o erro é de apenas 5m)
+    geo_quadra.forEach((p, i) => {
+        L.polyline([p, sc_ajustada[i]], {color: 'red', weight: 1.5}).addTo(map);
+    });
+
+    function exportarJSON() {
+        alert("Relatório de erro de 5.76m pronto para exportação.");
+    }
+</script>
+</body>
+</html>
