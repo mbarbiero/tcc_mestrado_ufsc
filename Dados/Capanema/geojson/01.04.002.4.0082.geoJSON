@@ -1,0 +1,46 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                -53.8053,
+                -25.6843
+              ],
+              [
+                -53.8048,
+                -25.6826
+              ],
+              [
+                -53.8043,
+                -25.6843
+              ],
+              [
+                -53.8045,
+                -25.6842
+              ],
+              [
+                -53.8039,
+                -25.6861
+              ],
+              [
+                -53.8053,
+                -25.6843
+              ]
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "codigo_cartografico": "01.04.002.4.0082",
+        "codigo_identificacao": "4104501.01.04.002.4.0082",
+        "precisao": "0.28"
+      }
+    }
+  ]
+}

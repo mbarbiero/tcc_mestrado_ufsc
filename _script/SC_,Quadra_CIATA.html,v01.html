@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SC_ Reconstrução Face 1 Superior (Verde)</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; background: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Segoe UI', sans-serif; }
+        #map-container { width: 800px; height: 600px; position: relative; border: 2px solid #ccc; box-shadow: 0 10px 30px rgba(0,0,0,0.2); background: white; }
+        #map { width: 100%; height: 100%; }
+        .info-panel {
+            position: absolute; top: 15px; left: 15px; z-index: 1001;
+            background: rgba(255, 255, 255, 0.95); padding: 15px;
+            border-radius: 4px; border-left: 5px solid #28a745; width: 300px;
+        }
+        textarea { width: 100%; height: 80px; font-size: 10px; font-family: monospace; margin: 10px 0; }
+        button { background: #28a745; color: white; border: none; padding: 10px; cursor: pointer; width: 100%; border-radius: 4px; font-weight: bold; }
+        .stats { font-size: 11px; margin-top: 10px; color: #444; line-height: 1.5; }
+    </style>
+</head>
+<body>
+
+<div id="map-container">
+    <div class="info-panel">
+        <h2 style="font-size: 14px; margin: 0; color: #28a745;">SC_ Face 1 Superior</h2>
+        <p style="font-size: 11px; color: #666;">Construção Horária: Face 1 no Topo</p>
+        <textarea id="jsonInput" placeholder='Cole o JSON aqui...'></textarea>
+        <button onclick="construirSuperior()">CONSTRUIR QUADRA</button>
+        <div id="stats" class="stats"></div>
+    </div>
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([-25.677, -53.805], 18);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    let layers = L.layerGroup().addTo(map);
+
+    function construirSuperior() {
+        try {
+            const data = JSON.parse(document.getElementById('jsonInput').value);
+            const faces = data.faces;
+            layers.clearLayers();
+
+            const d = (o) => faces.find(f => f.ordem_face === o)?.dim_face || 0;
+            const d1 = d(1), d2 = d(2), d3 = d(3), d4 = d(4);
+
+            const f1 = faces.find(f => f.ordem_face === 1);
+            const pLat = f1.centroide.lat;
+            const pLng = f1.centroide.lng;
+
+            // Escala para Capanema-PR
+            const mLat = 111320;
+            const mLon = 111320 * Math.cos(pLat * Math.PI / 180);
+
+            /**
+             * Lógica Horária com Face 1 Superior (y=0):
+             * V1 (Sup Esq): x = -d1/2, y = 0
+             * V2 (Sup Dir): x =  d1/2, y = 0
+             * V3 (Inf Dir): x =  d1/2, y = -d2
+             * V4 (Inf Esq): x = -d1/2, y = -d4
+             */
+            
+            const v1 = { x: -(d1/2), y: 0 };    // Superior Esquerdo
+            const v2 = { x: (d1/2),  y: 0 };    // Superior Direito
+            const v3 = { x: (d1/2),  y: -d2 };  // Inferior Direito
+            const v4 = { x: -(d1/2), y: -d4 };  // Inferior Esquerdo
+
+            const verticesMetros = [v1, v2, v3, v4];
+
+            const verticesGeo = verticesMetros.map(v => [
+                pLat + (v.y / mLat),
+                pLng + (v.x / mLon)
+            ]);
+
+            // Desenhar Polígono Verde
+            L.polygon(verticesGeo, {
+                color: "#1e7e34", fillColor: "#28a745", fillOpacity: 0.4, weight: 3
+            }).addTo(layers);
+
+            // Marcadores para validar o sentido horário
+            verticesGeo.forEach((v, i) => {
+                L.circleMarker(v, {radius: 4, color: '#155724', fillColor: 'white', fillOpacity: 1})
+                 .addTo(layers).bindTooltip(`Vértice ${i+1} (Canto da Face ${i+1 === 1 ? '1' : i})`);
+            });
+
+            // Centroide da Face 1 (Ponto de Ancoragem)
+            L.circleMarker([pLat, pLng], {radius: 3, color: 'red'}).addTo(layers)
+             .bindTooltip("Centroide Face 1 (Âncora Superior)");
+
+            map.setView([pLat, pLng], 19);
+
+            document.getElementById('stats').innerHTML = `
+                <b>F1 (Topo):</b> ${d1}m<br>
+                <b>F2 (Leste):</b> ${d2}m<br>
+                <b>F3 (Base):</b> ${d3}m<br>
+                <b>F4 (Oeste):</b> ${d4}m<br>
+                <small>Sentido: V1(NW) → V2(NE) → V3(SE) → V4(SW)</small>
+            `;
+
+        } catch (e) { alert("Erro ao processar JSON."); }
+    }
+</script>
+</body>
+</html>

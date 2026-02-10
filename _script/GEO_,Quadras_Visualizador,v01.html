@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>GEO Real - Capanema - PR</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: 'Segoe UI', sans-serif; }
+        #header { background: #1a252f; color: white; padding: 15px; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
+        #map { flex-grow: 1; width: 100%; }
+        .file-info { background: #34495e; padding: 8px 15px; border-radius: 4px; font-size: 13px; }
+    </style>
+</head>
+<body>
+
+<div id="header">
+    <div>
+        <strong>📂 GEO Real | Capanema - PR:</strong>
+        <input type="file" id="csvFile" accept=".csv">
+    </div>
+    <div id="status" class="file-info">Aguardando arquivo CSV...</div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+<script>
+    const map = L.map('map').setView([-25.6575, -53.8108], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    const layerGroup = L.featureGroup().addTo(map);
+
+    function extrairQuadrilatero(coords) {
+        if (coords.length <= 5) return coords.slice(0, 4);
+        let n = coords.reduce((a, b) => a[0] > b[0] ? a : b);
+        let s = coords.reduce((a, b) => a[0] < b[0] ? a : b);
+        let l = coords.reduce((a, b) => a[1] > b[1] ? a : b);
+        let o = coords.reduce((a, b) => a[1] < b[1] ? a : b);
+        let vertices = [n, l, s, o];
+        const centro = [vertices.reduce((sum, p) => sum + p[0], 0)/4, vertices.reduce((sum, p) => sum + p[1], 0)/4];
+        return vertices.sort((a, b) => Math.atan2(a[0]-centro[0], a[1]-centro[1]) - Math.atan2(b[0]-centro[0], b[1]-centro[1]));
+    }
+
+    document.getElementById('csvFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        Papa.parse(file, {
+            header: true, skipEmptyLines: true,
+            complete: function(results) { renderMap(results); }
+        });
+    });
+
+    function parseWKT(wkt) {
+        if (!wkt) return null;
+        const matches = wkt.match(/-?\d+\.\d+\s+-?\d+\.\d+/g);
+        return matches ? matches.map(p => {
+            const pts = p.split(/\s+/);
+            return [parseFloat(pts[1]), parseFloat(pts[0])]; 
+        }) : null;
+    }
+
+    function renderMap(results) {
+        layerGroup.clearLayers();
+        const geoCol = results.meta.fields.find(c => c.toLowerCase().endsWith('.geometria'));
+        const codeCol = results.meta.fields.find(c => c.toLowerCase().endsWith('.codigo_cartografico'));
+
+        results.data.forEach(row => {
+            let coords = parseWKT(row[geoCol]);
+            if (coords) {
+                const quad = extrairQuadrilatero(coords);
+                const poly = L.polygon(quad, { color: '#2980b9', weight: 1, fillOpacity: 0.4 });
+                poly.on('click', () => abrirJanelaGEOReal(row, quad, row[codeCol] || 'N/A'));
+                poly.addTo(layerGroup);
+            }
+        });
+        if (layerGroup.getLayers().length > 0) map.fitBounds(layerGroup.getBounds());
+    }
+
+    function abrirJanelaGEOReal(dados, v, codigo) {
+        const win = window.open('', '_blank', 'width=820,height=650');
+        const wktExport = `POLYGON((${v.map(p => p[1] + " " + p[0]).join(",")},${v[0][1]} ${v[0][0]}))`;
+        
+        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GEO Real - ${codigo}</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; background: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Segoe UI', sans-serif; }
+        #map-container { width: 800px; height: 600px; position: relative; border: 2px solid #ccc; background: #fff; }
+        #map { width: 100%; height: 100%; }
+        .info-panel { position: absolute; top: 15px; left: 15px; z-index: 1001; background: white; padding: 15px; border-radius: 4px; border-left: 5px solid #2980b9; width: 230px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .super-title { margin: 0; font-size: 13px; color: #2980b9; font-weight: bold; }
+        .main-title { margin: 0; font-size: 16px; color: #1a252f; }
+        .sub-title { margin: 2px 0 10px 0; font-size: 11px; color: #666; font-style: italic; }
+        .edge-label { background: #e91e63; color: white; padding: 2px 5px; border-radius: 3px; font-size: 11px; font-weight: bold; }
+        .btn { margin-top: 10px; width: 100%; padding: 8px; background: #333; color: white; border: none; cursor: pointer; font-size: 11px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div id="map-container">
+        <div class="info-panel">
+            <div class="super-title">SuperCIATA</div>
+            <h2 class="main-title">GEO Real</h2>
+            <div class="sub-title">Capanema - PR</div>
+            <p style="margin: 5px 0; font-size: 11px; color: #333;"><b>Quadra:</b> ${codigo}</p>
+            <div id="coords-list" style="margin-top:10px; font-size:10px; border-top:1px solid #eee; padding-top:5px;"></div>
+            <button class="btn" onclick="navigator.clipboard.writeText('${wktExport}'); alert('WKT Copiado!')">Copiar WKT (Simplificado)</button>
+        </div>
+        <div id="map"></div>
+    </div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+    <script>
+        const v = ${JSON.stringify(v)};
+        
+        // ZOOM FIXO EM 18
+        const map = L.map('map', { 
+            zoomControl: false, 
+            dragging: false, 
+            scrollWheelZoom: false,
+            minZoom: 18,
+            maxZoom: 18
+        });
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        const poly = L.polygon(v, { color: '#e91e63', weight: 4, fillOpacity: 0.2 }).addTo(map);
+        const center = poly.getBounds().getCenter();
+        
+        // Centralização com offset ajustado para zoom 18
+        const latOffset = 0.00030; 
+        const lngOffset = -0.00050; 
+        
+        map.setView([center.lat + latOffset, center.lng + lngOffset], 18);
+
+        let listHtml = "";
+        v.forEach((p, i) => {
+            L.circleMarker(p, { radius: 6, color: '#333', fillColor: 'white', fillOpacity: 1, weight: 2 }).addTo(map);
+            const proximo = v[(i + 1) % v.length];
+            const dist = L.latLng(p).distanceTo(L.latLng(proximo));
+            const mid = [(p[0] + proximo[0])/2, (p[1] + proximo[1])/2];
+            
+            L.marker(mid, { icon: L.divIcon({ className: 'edge-label', html: dist.toFixed(2) + 'm', iconSize: [55, 20] }) }).addTo(map);
+            listHtml += '<p style="margin:2px 0;"><b>V' + (i+1) + ':</b> ' + p[0].toFixed(7) + ', ' + p[1].toFixed(7) + '</p>';
+        });
+        document.getElementById('coords-list').innerHTML = listHtml;
+
+        window.onload = () => {
+            map.invalidateSize();
+            map.setView([center.lat + latOffset, center.lng + lngOffset], 18);
+        };
+    <\/script>
+</body>
+</html>`;
+
+        win.document.open();
+        win.document.write(html);
+        win.document.close();
+    }
+</script>
+
+</body>
+</html>

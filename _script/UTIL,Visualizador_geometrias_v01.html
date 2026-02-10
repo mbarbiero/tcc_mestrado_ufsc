@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Cadastral - Capanema (OSM)</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; font-family: 'Segoe UI', sans-serif; }
+        #header { background: #1a252f; color: white; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
+        #map { flex-grow: 1; width: 100%; }
+        .upload-area { display: flex; align-items: center; gap: 15px; }
+        .file-input { cursor: pointer; color: #ecf0f1; }
+        #status { font-size: 0.85em; color: #3498db; font-weight: bold; }
+        .leaflet-popup-content { font-size: 13px; line-height: 1.5; }
+    </style>
+</head>
+<body>
+
+<div id="header">
+    <div class="upload-area">
+        <strong>📂 Cadastro Urbano:</strong>
+        <input type="file" id="csvFile" accept=".csv" class="file-input">
+        <span id="status">Selecione o arquivo CSV de Capanema</span>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+<script>
+    // Configuração das camadas base (OSM e Satélite)
+    const osmStandard = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    });
+
+    const osmHot = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors, Humanitarian map style'
+    });
+
+    const googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',{
+        maxZoom: 20,
+        subdomains:['mt0','mt1','mt2','mt3'],
+        attribution: 'Google Satellite'
+    });
+
+    // Inicializa o mapa com OSM Standard
+    const map = L.map('map', {
+        center: [-25.6575, -53.8108],
+        zoom: 15,
+        layers: [osmStandard]
+    });
+
+    // Controle de Camadas
+    const baseMaps = {
+        "OpenStreetMap": osmStandard,
+        "OSM Humanitário": osmHot,
+        "Satélite": googleSat
+    };
+    L.control.layers(baseMaps).addTo(map);
+
+    const lotesLayer = L.featureGroup().addTo(map);
+
+    // Processamento do Arquivo
+    document.getElementById('csvFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        document.getElementById('status').innerText = "Processando...";
+
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: function(results) {
+                renderizarLotes(results.data);
+            }
+        });
+    });
+
+    function parseWKT(wkt) {
+        if (!wkt) return null;
+        const coords = [];
+        const regex = /(-?\d+\.\d+)\s+(-?\d+\.\d+)/g;
+        let match;
+        while ((match = regex.exec(wkt)) !== null) {
+            coords.push([parseFloat(match[2]), parseFloat(match[1])]);
+        }
+        return coords.length > 0 ? coords : null;
+    }
+
+    function renderizarLotes(data) {
+        lotesLayer.clearLayers();
+        let count = 0;
+
+        data.forEach(row => {
+            const wkt = row['lotes_urbanos.geometria'];
+            const codigo = row['lotes_urbanos.codigo_cartografico'];
+            const area = row['lotes_urbanos.area'];
+            
+            const pontos = parseWKT(wkt);
+            if (pontos) {
+                const p = L.polygon(pontos, {
+                    color: '#2980b9',
+                    weight: 1,
+                    fillColor: '#3498db',
+                    fillOpacity: 0.4
+                });
+
+                p.bindPopup(`
+                    <strong>CÓDIGO:</strong> ${codigo}<br>
+                    <strong>ÁREA:</strong> ${area} m²
+                `);
+                
+                p.addTo(lotesLayer);
+                count++;
+            }
+        });
+
+        if (count > 0) {
+            map.fitBounds(lotesLayer.getBounds());
+            document.getElementById('status').innerText = `${count} lotes carregados no OSM.`;
+        }
+    }
+</script>
+
+</body>
+</html>

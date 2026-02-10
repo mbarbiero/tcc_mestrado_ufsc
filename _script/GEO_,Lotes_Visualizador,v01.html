@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Exportador de Dimensões</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: 'Segoe UI', sans-serif; }
+        #header { background: #1a252f; color: white; padding: 15px; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
+        #map { flex-grow: 1; width: 100%; background: #f0f0f0; }
+        .controls { display: flex; gap: 10px; align-items: center; }
+        .btn-export { background: #27ae60; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; display: none; }
+        .btn-export:hover { background: #219150; }
+        .file-info { background: #34495e; padding: 8px 15px; border-radius: 4px; font-size: 13px; }
+    </style>
+</head>
+<body>
+
+<div id="header">
+    <div class="controls">
+        <strong>📂 SuperCIATA | Lotes Capanema:</strong>
+        <input type="file" id="csvFile" accept=".csv">
+        <button id="exportBtn" class="btn-export">📥 Exportar CSV com Dimensões</button>
+    </div>
+    <div id="status" class="file-info">Aguardando arquivo...</div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+<script>
+    const map = L.map('map').setView([-25.668, -53.805], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    const layerGroup = L.featureGroup().addTo(map);
+    let dadosOriginais = [];
+
+    // Algoritmo de Visvalingam-Whyatt individualizado
+    function visvalingam(points, threshold = 0.0000000001) {
+        if (points.length <= 4) return points;
+        let pts = points.slice();
+        while (pts.length > 4) {
+            let minArea = Infinity;
+            let removeIndex = -1;
+            for (let i = 1; i < pts.length - 1; i++) {
+                let area = Math.abs(pts[i-1][0]*(pts[i][1]-pts[i+1][1]) + pts[i][0]*(pts[i+1][1]-pts[i-1][1]) + pts[i+1][0]*(pts[i-1][1]-pts[i][1]))/2;
+                if (area < minArea) { minArea = area; removeIndex = i; }
+            }
+            if (minArea < threshold) pts.splice(removeIndex, 1);
+            else break;
+        }
+        return pts;
+    }
+
+    function calcularDimensoes(coords) {
+        let faces = [];
+        for (let i = 0; i < coords.length; i++) {
+            let p1 = coords[i];
+            let p2 = coords[(i + 1) % coords.length];
+            faces.push(L.latLng(p1).distanceTo(L.latLng(p2)));
+        }
+        faces.sort((a, b) => a - b);
+        
+        // Lógica urbana: Testada (menores lados frontais), Profundidade (maiores lados laterais)
+        // Em lotes retangulares simples: Testada = menor, Profundidade = maior
+        let testada = faces[0]; 
+        let profundidade = faces[faces.length - 1];
+        
+        return { 
+            testada: testada.toFixed(2), 
+            profundidade: profundidade.toFixed(2) 
+        };
+    }
+
+    document.getElementById('csvFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        Papa.parse(file, {
+            header: true, skipEmptyLines: true,
+            complete: function(results) {
+                dadosOriginais = results.data;
+                document.getElementById('exportBtn').style.display = 'block';
+                renderMap(results);
+            }
+        });
+    });
+
+    function parseWKT(wkt) {
+        if (!wkt) return null;
+        const matches = wkt.match(/-?\d+\.\d+\s+-?\d+\.\d+/g);
+        if (!matches) return null;
+        let pts = matches.map(p => {
+            const parts = p.split(/\s+/);
+            return [parseFloat(parts[1]), parseFloat(parts[0])]; 
+        });
+        if (pts.length > 2 && pts[0][0] === pts[pts.length-1][0] && pts[0][1] === pts[pts.length-1][1]) pts.pop();
+        return pts;
+    }
+
+    function renderMap(results) {
+        layerGroup.clearLayers();
+        const geoCol = results.meta.fields.find(c => c.toLowerCase().includes('geometria'));
+        results.data.forEach(row => {
+            let pts = parseWKT(row[geoCol]);
+            if (pts) {
+                let coords = visvalingam(pts);
+                L.polygon(coords, { color: '#27ae60', weight: 1.5, fillOpacity: 0.3 }).addTo(layerGroup);
+            }
+        });
+        if (layerGroup.getLayers().length > 0) map.fitBounds(layerGroup.getBounds());
+    }
+
+    document.getElementById('exportBtn').addEventListener('click', function() {
+        const geoCol = Object.keys(dadosOriginais[0]).find(c => c.toLowerCase().includes('geometria'));
+        
+        const novosDados = dadosOriginais.map(row => {
+            let pts = parseWKT(row[geoCol]);
+            let dim = { testada: "0.00", profundidade: "0.00" };
+            if (pts) {
+                let coords = visvalingam(pts);
+                dim = calcularDimensoes(coords);
+            }
+            return { ...row, testada_m: dim.testada, profundidade_m: dim.profundidade };
+        });
+
+        const csv = Papa.unparse(novosDados);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute("download", "lotes_capanema_com_dimensoes.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    });
+</script>
+
+</body>
+</html>

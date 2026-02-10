@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Geometria de Quadras</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { width: 100%; height: 100vh; background: #ddd; }
+        .label-dim {
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid #666;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const data = [
+  {
+    "sc_id_quadra": ["0E9A43FC", "37EBE4BB", "5C81EDF2", "EF2B51D7"],
+    "faces": [
+      { "ordem_face": 1, "dim_face": 127.38, "centroide": { "lat": -25.657144305, "lng": -53.810254861666664 } }
+    ],
+    // Simplificando: usaremos o centroide da face 1 para a quadra toda neste exemplo
+    "centroide_geral": { "lat": -25.657144, "lng": -53.810254 },
+    "dimensoes": [127.38, 122.76, 114.9, 132.78] // F1, F2, F3, F4
+  },
+  {
+    "sc_id_quadra": ["1558A9D1", "9003F37C", "F0D334EC", "F54DE0AF"],
+    "centroide_geral": { "lat": -25.680599, "lng": -53.802336 },
+    "dimensoes": [89.82, 100.22, 111.98, 82.44]
+  },
+  {
+    "sc_id_quadra": ["6B8E7F2D", "736565AB", "9E705E10", "E544EA7B"],
+    "centroide_geral": { "lat": -25.677154, "lng": -53.804776 },
+    "dimensoes": [119.76, 126.25, 109.99, 115.27]
+  }
+];
+
+// Inicializar Mapa
+const map = L.map('map').setView([-25.67, -53.80], 14);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+// Função para converter metros em diferença de Lat/Lng (aproximação local)
+function metersToCoords(lat, mLat, mLng) {
+    const latDiff = mLat / 111320; 
+    const lngDiff = mLng / (111320 * Math.cos(lat * (Math.PI / 180)));
+    return [latDiff, lngDiff];
+}
+
+data.forEach(q => {
+    const c = q.centroide_geral;
+    const [w1, h2, w3, h4] = q.dimensoes;
+
+    // Cálculo dos offsets em metros baseados no centroide
+    // Face 1 no topo (Norte), horizontal
+    const offTop = metersToCoords(c.lat, h4/2, w1/2);
+    const offBottom = metersToCoords(c.lat, -h2/2, w3/2);
+
+    const p1 = [c.lat + offTop[0], c.lng - offTop[1]]; // Sup Esq
+    const p2 = [c.lat + offTop[0], c.lng + offTop[1]]; // Sup Dir
+    const p3 = [c.lat - offBottom[0], c.lng + offBottom[1]]; // Inf Dir
+    const p4 = [c.lat - offBottom[0], c.lng - offBottom[1]]; // Inf Esq
+
+    const polygon = L.polygon([p1, p2, p3, p4], {
+        color: '#e74c3c',
+        weight: 3,
+        fillColor: '#f1c40f',
+        fillOpacity: 0.4
+    }).addTo(map);
+
+    // Adicionar etiquetas de dimensão nos pontos médios das arestas
+    const midPoints = [
+        { pos: [(p1[0]+p2[0])/2, (p1[1]+p2[1])/2], val: w1 + "m (F1)" },
+        { pos: [(p2[0]+p3[0])/2, (p2[1]+p3[1])/2], val: h2 + "m (F2)" },
+        { pos: [(p3[0]+p4[0])/2, (p3[1]+p4[1])/2], val: w3 + "m (F3)" },
+        { pos: [(p4[0]+p1[0])/2, (p4[1]+p1[1])/2], val: h4 + "m (F4)" }
+    ];
+
+    midPoints.forEach(m => {
+        L.marker(m.pos, {
+            icon: L.divIcon({
+                className: 'label-dim',
+                html: m.val,
+                iconSize: [60, 20]
+            })
+        }).addTo(map);
+    });
+
+    polygon.bindPopup(`<b>Quadra:</b><br>${q.sc_id_quadra.join(', ')}`);
+});
+
+// Ajustar zoom para ver todas as quadras
+const group = new L.featureGroup(map._layers);
+if (Object.keys(map._layers).length > 1) map.fitBounds(polygon.getBounds());
+
+</script>
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Integrador CADURB Final</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; padding: 40px; background: #f4f7f6; color: #2c3e50; }
+        .card { max-width: 700px; background: white; padding: 35px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); margin: auto; }
+        h2 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 15px; margin-top: 0; text-transform: uppercase; letter-spacing: 1px; }
+        .info-box { font-size: 0.9em; color: #34495e; margin-bottom: 25px; background: #ebf5fb; padding: 15px; border-left: 5px solid #3498db; border-radius: 4px; }
+        .file-box { margin-bottom: 20px; }
+        label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 14px; color: #34495e; }
+        input[type="file"] { width: 100%; padding: 12px; border: 2px solid #dcdde1; border-radius: 6px; cursor: pointer; box-sizing: border-box; background: #fafafa; }
+        input[type="file"]:hover { border-color: #3498db; }
+        button { background: #3498db; color: white; border: none; padding: 16px; border-radius: 6px; cursor: pointer; width: 100%; font-size: 16px; font-weight: bold; transition: 0.3s; margin-top: 10px; }
+        button:hover { background: #2980b9; transform: translateY(-1px); }
+        #status-log { margin-top: 25px; font-family: 'Courier New', monospace; font-size: 13px; max-height: 200px; overflow-y: auto; background: #2d3436; color: #00cec9; padding: 15px; border-radius: 6px; display: none; border: 1px solid #636e72; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>Integração CADURB - Sem Especiais</h2>
+    <div class="info-box">
+        <strong>Campos Alvo:</strong> DIM_TESTADA, DIM_PROFUNDIDADE e NOM_LOGRADOURO_ADJACENTE.<br>
+        <strong>Chave de Ligação:</strong> COD_UNICO_ENDERECO ↔ codigo_cartografico.<br>
+        <em>Nota: Apenas substitui se o novo valor existir e não for nulo.</em>
+    </div>
+    
+    <div class="file-box">
+        <label>1. Arquivo de Origem (Calculado + Adjacente):</label>
+        <input type="file" id="csvOrigem" accept=".csv">
+    </div>
+
+    <div class="file-box">
+        <label>2. CI_CAPANEMA_CADURB.csv (Original):</label>
+        <input type="file" id="csvCadurb" accept=".csv">
+    </div>
+
+    <button id="btnProcessar">Executar e Exportar CSV</button>
+    <div id="status-log"></div>
+</div>
+
+<script>
+    document.getElementById('btnProcessar').addEventListener('click', async () => {
+        const fileOrigem = document.getElementById('csvOrigem').files[0];
+        const fileCad = document.getElementById('csvCadurb').files[0];
+        const log = document.getElementById('status-log');
+
+        if (!fileOrigem || !fileCad) {
+            alert("Selecione os ficheiros necessários.");
+            return;
+        }
+
+        log.style.display = 'block';
+        log.innerHTML = "> Processando ficheiros...<br>";
+
+        const lerCSV = (arquivo) => new Promise(res => {
+            Papa.parse(arquivo, { header: true, skipEmptyLines: true, complete: res });
+        });
+
+        const resOrigem = await lerCSV(fileOrigem);
+        const resCad = await lerCSV(fileCad);
+
+        // Criar Mapa de busca
+        const mapaDados = new Map();
+        resOrigem.data.forEach(item => {
+            const id = item['lotes_urbanos.codigo_cartografico'];
+            if (id) {
+                mapaDados.set(id, {
+                    t: item['testada_m'],
+                    p: item['profundidade_m'],
+                    adj: item['Adjacente']
+                });
+            }
+        });
+
+        log.innerHTML += `> Mapeamento concluído: ${mapaDados.size} registos de origem.<br>`;
+
+        let contDim = 0;
+        let contAdj = 0;
+
+        const dadosFinais = resCad.data.map(linha => {
+            const codigo = linha['COD_UNICO_ENDERECO'];
+            const novosValores = mapaDados.get(codigo);
+
+            if (novosValores) {
+                // Atualiza Dimensões
+                if (novosValores.t && novosValores.t !== "") {
+                    linha['DIM_TESTADA'] = novosValores.t;
+                    linha['DIM_PROFUNDIDADE'] = novosValores.p;
+                    contDim++;
+                }
+                
+                // Atualiza NOM_LOGRADOURO_ADJACENTE se existir
+                if (novosValores.adj && novosValores.adj.trim() !== "") {
+                    linha['NOM_LOGRADOURO_ADJACENTE'] = novosValores.adj;
+                    contAdj++;
+                }
+            }
+            return linha;
+        });
+
+        log.innerHTML += `> Dimensões atualizadas: ${contDim}<br>`;
+        log.innerHTML += `> Logradouros Adjacentes: ${contAdj}<br>`;
+        log.innerHTML += `> Download pronto.<br>`;
+
+        // Exportação simples em UTF-8 sem BOM (já que não há caracteres especiais)
+        const csvFinal = Papa.unparse(dadosFinais);
+        const blob = new Blob([csvFinal], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "CI_CAPANEMA_CADURB_ATUALIZADO.csv";
+        link.click();
+    });
+</script>
+
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SC_ Comparativo: Original vs Simplificado</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; background-color: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        #map-container { width: 800px; height: 600px; position: relative; border: 2px solid #ccc; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); background: white; overflow: hidden; }
+        #map { width: 100%; height: 100%; }
+        .info-panel {
+            position: absolute; top: 15px; left: 15px; z-index: 1001;
+            background: rgba(255, 255, 255, 0.95); padding: 15px;
+            border-radius: 4px; border-left: 5px solid #ff69b4;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); width: 280px;
+        }
+        .info-panel h2 { margin: 0 0 5px 0; font-size: 14px; color: #333; text-transform: uppercase; }
+        .legend { font-size: 11px; margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+        .color-box { width: 12px; height: 12px; border-radius: 2px; }
+        .input-file { font-size: 11px; margin-top: 10px; width: 100%; }
+        .coords-list { background: #f8f9fa; padding: 8px; border: 1px solid #ddd; margin-top: 10px; max-height: 120px; overflow-y: auto; font-family: monospace; font-size: 10px; }
+    </style>
+</head>
+<body>
+
+<div id="map-container">
+    <div class="info-panel">
+        <h2>SC_ Análise de Vértices</h2>
+        <div class="legend">
+            <div class="legend-item"><div class="color-box" style="background: #333;"></div> Geometria Original (Todos os pontos)</div>
+            <div class="legend-item"><div class="color-box" style="background: #ff69b4;"></div> Quadrilátero Simplificado</div>
+        </div>
+        <input type="file" id="fileInput" class="input-file" accept=".json,.geojson">
+        <div id="result-info" class="coords-list">Carregue o GeoJSON...</div>
+    </div>
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([-25.6807, -53.8018], 19);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    let layerOriginal = L.layerGroup().addTo(map);
+    let layerSimplificada = L.layerGroup().addTo(map);
+
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            try {
+                const geojson = JSON.parse(event.target.result);
+                layerOriginal.clearLayers();
+                layerSimplificada.clearLayers();
+
+                let allPoints = [];
+
+                // 1. Renderizar Original e Coletar Pontos
+                L.geoJSON(geojson, {
+                    style: { color: "#333", weight: 2, dashArray: "5, 10", fillOpacity: 0.1 },
+                    pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 3, color: "#333" })
+                }).addTo(layerOriginal).eachLayer(layer => {
+                    if (layer.getLatLngs) allPoints = allPoints.concat(layer.getLatLngs().flat(Infinity));
+                    else if (layer.getLatLng) allPoints.push(layer.getLatLng());
+                });
+
+                if (allPoints.length > 0) {
+                    // 2. Lógica para Identificar os 4 Cantos Reais (NW, NE, SE, SW)
+                    // Buscamos pontos que maximizam as combinações de Lat e Lng (extremos rotacionados)
+                    let nw = allPoints[0], ne = allPoints[0], se = allPoints[0], sw = allPoints[0];
+
+                    allPoints.forEach(p => {
+                        if (p.lat - p.lng > nw.lat - nw.lng) nw = p; // Superior Esquerdo
+                        if (p.lat + p.lng > ne.lat + ne.lng) ne = p; // Superior Direito
+                        if (-p.lat + p.lng > -se.lat + se.lng) se = p; // Inferior Direito
+                        if (-p.lat - p.lng > -sw.lat - sw.lng) sw = p; // Inferior Esquerdo
+                    });
+
+                    const vertices = [nw, ne, se, sw];
+                    const centroide = [
+                        vertices.reduce((s, p) => s + p.lat, 0) / 4,
+                        vertices.reduce((s, p) => s + p.lng, 0) / 4
+                    ];
+
+                    // 3. Renderizar Simplificado (Rosa)
+                    L.polygon(vertices.map(v => [v.lat, v.lng]), {
+                        color: "#ff1493", fillColor: "#ff69b4", fillOpacity: 0.3, weight: 3
+                    }).addTo(layerSimplificada);
+
+                    // Adicionar marcadores nos 4 cantos simplificados
+                    vertices.forEach((v, i) => {
+                        L.circleMarker([v.lat, v.lng], { radius: 5, color: "#ff1493", fillOpacity: 1 }).addTo(layerSimplificada);
+                    });
+
+                    // 4. Ajustar Visão
+                    map.setView(centroide, 19);
+
+                    document.getElementById('result-info').innerHTML = 
+                        `<b>Vértices Originais:</b> ${allPoints.length}<br>` +
+                        `<b>Centroide:</b> ${centroide[0].toFixed(7)}, ${centroide[1].toFixed(7)}<br>` +
+                        `<b>NW:</b> ${nw.lat.toFixed(6)}, ${nw.lng.toFixed(6)}`;
+                }
+            } catch (err) { alert("Erro no GeoJSON"); }
+        };
+        reader.readAsText(file);
+    });
+
+    setTimeout(() => map.invalidateSize(), 200);
+</script>
+</body>
+</html>

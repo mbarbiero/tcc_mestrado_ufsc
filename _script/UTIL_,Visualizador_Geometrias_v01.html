@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador GIS Dinâmico - OSM</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; font-family: 'Segoe UI', sans-serif; }
+        #header { background: #2c3e50; color: white; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
+        #map { flex-grow: 1; width: 100%; }
+        .upload-area { display: flex; align-items: center; gap: 15px; }
+        .file-input { cursor: pointer; color: #ecf0f1; border: 1px dashed #7f8c8d; padding: 5px; border-radius: 4px; }
+        #status { font-size: 0.85em; color: #3498db; font-weight: bold; }
+        .legend { background: white; padding: 10px; line-height: 18px; color: #555; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); }
+    </style>
+</head>
+<body>
+
+<div id="header">
+    <div class="upload-area">
+        <strong>🗺️ Validador de Geometrias:</strong>
+        <input type="file" id="csvFile" accept=".csv" class="file-input">
+        <span id="status">Selecione o arquivo CSV (.geometria)</span>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+<script>
+    // Camadas de Mapa
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' });
+    const satelite = L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',{
+        maxZoom: 20, subdomains:['mt0','mt1','mt2','mt3'], attribution: 'Google Sat'
+    });
+
+    const map = L.map('map', { center: [-25.6575, -53.8108], zoom: 15, layers: [osm] });
+    L.control.layers({ "OpenStreetMap": osm, "Satélite": satelite }).addTo(map);
+
+    const layerGroup = L.featureGroup().addTo(map);
+
+    document.getElementById('csvFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        document.getElementById('status').innerText = "Analisando colunas...";
+
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: function(results) {
+                processarCSV(results);
+            }
+        });
+    });
+
+    function processarCSV(results) {
+        const data = results.data;
+        const columns = results.meta.fields; // Pega os nomes das colunas
+        
+        // REGEX/Lógica para encontrar a coluna que termina com ".geometria"
+        const geoColumn = columns.find(col => col.toLowerCase().endsWith('.geometria'));
+        const codeColumn = columns.find(col => col.toLowerCase().endsWith('.codigo_cartografico')) || columns[0];
+
+        if (!geoColumn) {
+            alert("Erro: Não foi encontrada nenhuma coluna terminando em '.geometria'");
+            document.getElementById('status').innerText = "Erro na estrutura do arquivo.";
+            return;
+        }
+
+        layerGroup.clearLayers();
+        let count = 0;
+
+        data.forEach(row => {
+            const wkt = row[geoColumn];
+            const coords = parseWKT(wkt);
+            
+            if (coords) {
+                const poly = L.polygon(coords, {
+                    color: '#2c3e50', weight: 1.5, fillColor: '#3498db', fillOpacity: 0.4
+                });
+
+                // Cria o Popup com todas as informações da linha para ajudar no trabalho
+                let popupContent = `<strong>Coluna Geometria:</strong> ${geoColumn}<br><hr>`;
+                for (let key in row) {
+                    popupContent += `<strong>${key}:</strong> ${row[key]}<br>`;
+                }
+
+                poly.bindPopup(popupContent);
+                poly.addTo(layerGroup);
+                count++;
+            }
+        });
+
+        if (count > 0) {
+            map.fitBounds(layerGroup.getBounds());
+            document.getElementById('status').innerText = `${count} lotes detectados via coluna "${geoColumn}"`;
+        }
+    }
+
+    function parseWKT(wkt) {
+        if (!wkt || typeof wkt !== 'string') return null;
+        const matches = wkt.match(/-?\d+\.\d+\s+-?\d+\.\d+/g);
+        if (!matches) return null;
+        return matches.map(pair => {
+            const p = pair.split(/\s+/);
+            return [parseFloat(p[1]), parseFloat(p[0])]; // Inverte para Lat/Lng
+        });
+    }
+</script>
+
+</body>
+</html>
