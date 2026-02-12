@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Alinhamento Laranja (Busca Regex Flexível)</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; background: #1a1a1a; color: white; display: flex; flex-direction: column; align-items: center; min-height: 100vh; font-family: 'Segoe UI', sans-serif; }
+        #input-area { width: 900px; background: #2c3e50; padding: 20px; border-radius: 8px 8px 0 0; margin-top: 10px; }
+        textarea { width: 100%; height: 60px; border-radius: 4px; padding: 8px; font-family: monospace; font-size: 11px; color: #333; }
+        .btn-orange { background: #e67e22; color: white; border: none; padding: 12px; width: 100%; border-radius: 4px; cursor: pointer; margin-top: 10px; font-weight: bold; text-transform: uppercase; }
+        .btn-orange:hover { background: #d35400; }
+        #map-container { width: 900px; height: 500px; position: relative; display: none; }
+        #map { width: 100%; height: 100%; }
+        .side-panel { position: absolute; top: 10px; left: 10px; z-index: 1001; background: rgba(255,255,255,0.95); color: #333; padding: 15px; border-radius: 4px; width: 280px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        .wkt-box { background: #fff5e6; padding: 10px; font-family: monospace; font-size: 10px; word-break: break-all; margin-top: 10px; border: 1px solid #e67e22; max-height: 100px; overflow-y: auto; color: #d35400; }
+        .label { font-weight: bold; color: #e67e22; font-size: 12px; }
+        .debug-info { font-size: 9px; color: #7f8c8d; margin-top: 5px; font-family: monospace; }
+    </style>
+</head>
+<body>
+
+    <div id="input-area">
+        <textarea id="json-input" placeholder="Cole o JSON da quadra..."></textarea>
+        <button class="btn-orange" onclick="processarETransladar()">Gerar Quadra com Busca Flexível</button>
+    </div>
+
+    <div id="map-container">
+        <div class="side-panel">
+            <div class="label">ESTADO DA RETIFICAÇÃO</div>
+            <div id="stats" style="font-size: 11px; margin-top: 5px;"></div>
+            <div id="debug-regex" class="debug-info"></div>
+            <div class="label" style="margin-top:15px;">WKT TRANSLADADO:</div>
+            <div id="wkt-output" class="wkt-box"></div>
+            <button class="btn-orange" style="background:#333; font-size:10px;" onclick="copyWkt()">Copiar WKT</button>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let map;
+        const R = 6378137;
+
+        // Função para tornar a busca de rua "insensível" a acentos e erros comuns
+        function prepararRegexBusca(nome) {
+            if (!nome) return "";
+            let busca = nome.toUpperCase()
+                .replace(/RUA |AVENIDA |AV\. |TRAVESSA |DR\. |DOUTOR |CEL\. |CORONEL /gi, "") 
+                .trim()
+                .replace(/[AÁÀÂÃ]/g, "[AÁÀÂÃ]")
+                .replace(/[EÉÈÊ]/g, "[EÉÈÊ]")
+                .replace(/[IÍÌÎ]/g, "[IÍÌÎ]")
+                .replace(/[OÓÒÔÕ]/g, "[OÓÒÔÕ]")
+                .replace(/[UÚÙÛ]/g, "[UÚÙÛ]")
+                .replace(/[CÇ]/g, "[CÇ]");
+            
+            // Adiciona s? no final para ignorar plurais e o operador .* para buscar partes do nome
+            return ".*" + busca + "s?.*"; 
+        }
+
+        async function processarETransladar() {
+            const input = document.getElementById('json-input').value;
+            if(!input) return;
+
+            try {
+                const data = JSON.parse(input);
+                const f1 = data.faces.find(f => f.ordem_face === 1);
+                const f3 = data.faces.find(f => f.ordem_face === 3);
+
+                document.getElementById('map-container').style.display = 'block';
+
+                // 1. Busca Flexível via Overpass usando REGEX (~)
+                const nomeFlexivel = prepararRegexBusca(f1.nome_logradouro);
+                document.getElementById('debug-regex').innerText = "Regex: " + nomeFlexivel;
+
+                const query = `[out:json];way["name"~"${nomeFlexivel}",i](around:200,${f1.centroide.lat},${f1.centroide.lng});out geom;`;
+                
+                const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: query });
+                const osm = await res.json();
+
+                if(!osm.elements || osm.elements.length === 0) {
+                    throw new Error("Não foi possível encontrar a via '" + f1.nome_logradouro + "' mesmo com busca flexível.");
+                }
+
+                // Pega a geometria da via encontrada
+                const g = osm.elements[0].geometry.sort((a,b) => 
+                    Math.hypot(a.lat-f1.centroide.lat, a.lon-f1.centroide.lng) - 
+                    Math.hypot(b.lat-f1.centroide.lat, b.lon-f1.centroide.lng)
+                ).slice(0,2);
+
+                const angle = Math.atan2(g[1].lat - g[0].lat, (g[1].lon - g[0].lon) * Math.cos(f1.centroide.lat * Math.PI / 180));
+
+                // 2. Projeção Geométrica
+                const d = {}; data.faces.forEach(f => d[f.ordem_face] = f.dim_face);
+                const project = (latBase, lngBase, dn, de) => {
+                    const re = de * Math.cos(angle) - dn * Math.sin(angle);
+                    const rn = de * Math.sin(angle) + dn * Math.cos(angle);
+                    return [latBase + (rn/R)*(180/Math.PI), lngBase + (re/(R*Math.cos(latBase*Math.PI/180)))*(180/Math.PI)];
+                };
+
+                let vRaw = [
+                    project(f1.centroide.lat, f1.centroide.lng, 0, -d[1]/2),
+                    project(f1.centroide.lat, f1.centroide.lng, 0, d[1]/2),
+                    project(f1.centroide.lat, f1.centroide.lng, d[2], d[1]/2),
+                    project(f1.centroide.lat, f1.centroide.lng, d[4], -d[1]/2)
+                ];
+
+                // 3. Translação para Coincidir Centroides
+                const cGerado = [vRaw.reduce((a,b)=>a+b[0],0)/4, vRaw.reduce((a,b)=>a+b[1],0)/4];
+                const cAlvo = [
+                    data.faces.reduce((a,b)=>a+b.centroide.lat,0)/4,
+                    data.faces.reduce((a,b)=>a+b.centroide.lng,0)/4
+                ];
+
+                const dLat = cAlvo[0] - cGerado[0];
+                const dLng = cAlvo[1] - cGerado[1];
+                const vFinal = vRaw.map(v => [v[0] + dLat, v[1] + dLng]);
+
+                renderFinal(vFinal, cAlvo, data.sc_id_quadra, osm.elements[0].tags.name);
+            } catch (e) { 
+                alert("Erro: " + e.message); 
+                console.error(e);
+            }
+        }
+
+        function renderFinal(v, centro, id, nomeEncontrado) {
+            if(map) map.remove();
+            map = L.map('map', { zoomControl: false });
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+            const poly = L.polygon(v, { color: '#e67e22', weight: 3, fillColor: '#e67e22', fillOpacity: 0.4 }).addTo(map);
+            map.fitBounds(poly.getBounds(), { padding: [100, 100] });
+
+            L.circleMarker(centro, { radius: 5, color: '#d35400', fillColor: '#fff', fillOpacity: 1 }).addTo(map);
+
+            const wkt = `POLYGON((${v.map(p => `${p[1].toFixed(8)} ${p[0].toFixed(8)}`).join(', ')}, ${v[0][1].toFixed(8)} ${v[0][0].toFixed(8)}))`;
+            document.getElementById('wkt-output').innerText = wkt;
+            document.getElementById('stats').innerHTML = `<b>Quadra:</b> ${id}<br><b>Via OSM:</b> ${nomeEncontrado}`;
+        }
+
+        function copyWkt() {
+            const text = document.getElementById('wkt-output').innerText;
+            navigator.clipboard.writeText(text);
+            alert("WKT copiado!");
+        }
+    </script>
+</body>
+</html>

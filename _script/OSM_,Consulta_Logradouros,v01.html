@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Exportador de Logradouros OSM</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; background: #1a1a1a; color: white; display: flex; flex-direction: column; align-items: center; min-height: 100vh; font-family: 'Segoe UI', sans-serif; }
+        #input-area { width: 950px; background: #2c3e50; padding: 20px; border-radius: 8px 8px 0 0; margin-top: 10px; }
+        textarea { width: 100%; height: 100px; border-radius: 4px; padding: 10px; font-family: monospace; font-size: 12px; border: none; resize: none; color: #333; }
+        .btn-main { background: #e67e22; color: white; border: none; padding: 15px; width: 100%; border-radius: 4px; cursor: pointer; margin-top: 10px; font-weight: bold; text-transform: uppercase; transition: 0.3s; }
+        .btn-main:disabled { background: #7f8c8d; }
+        
+        #dashboard { width: 950px; display: grid; grid-template-columns: 350px 1fr; background: #fff; border-radius: 0 0 8px 8px; overflow: hidden; display: none; }
+        #side-panel { padding: 20px; color: #333; border-right: 1px solid #ddd; overflow-y: auto; max-height: 600px; }
+        #map { height: 600px; background: #e5e5e5; }
+
+        .face-card { font-size: 11px; padding: 10px; margin-bottom: 10px; border-radius: 4px; border-left: 5px solid #ccc; background: #f9f9f9; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .found { border-left-color: #27ae60; }
+        .not-found { border-left-color: #c0392b; }
+        .label { font-weight: bold; color: #d35400; font-size: 10px; text-transform: uppercase; display: block; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <div id="input-area">
+        <textarea id="json-input" placeholder="Cole o JSON com as faces aqui..."></textarea>
+        <button id="btn-executar" class="btn-main" onclick="processarEExportar()">Gerar Arquivos por Logradouro</button>
+    </div>
+
+    <div id="dashboard">
+        <div id="side-panel">
+            <b style="color: #2c3e50;">LOG DE EXPORTAÇÃO</b>
+            <div id="status-container" style="margin-top: 10px;"></div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let map;
+
+        function normalizarParaBusca(t) {
+            return t.toUpperCase()
+                .replace(/RUA |AVENIDA |AV\. |TRAVESSA |DR\. |CEL\. /gi, "").trim()
+                .replace(/[AÁÀÂÃ]/g, "[AÁÀÂÃ]").replace(/[EÉÈÊ]/g, "[EÉÈÊ]")
+                .replace(/[IÍÌÎ]/g, "[IÍÌÎ]").replace(/[OÓÒÔÕ]/g, "[OÓÒÔÕ]")
+                .replace(/[UÚÙÛ]/g, "[UÚÙÛ]").replace(/[CÇ]/g, "[CÇ]");
+        }
+
+        // Converte geometria OSM para WKT LINESTRING
+        function formatarWKT(geometry) {
+            const pontos = geometry.map(p => `${p.lon.toFixed(8)} ${p.lat.toFixed(8)}`).join(', ');
+            return `LINESTRING (${pontos})`;
+        }
+
+        function salvarJSON(obj, nomeArquivo) {
+            const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `${nomeArquivo}.json`;
+            link.click();
+        }
+
+        async function processarEExportar() {
+            const input = document.getElementById('json-input').value;
+            if(!input) return;
+
+            const data = JSON.parse(input);
+            const container = document.getElementById('status-container');
+            container.innerHTML = "Processando faces...";
+            document.getElementById('dashboard').style.display = 'grid';
+
+            if(map) map.remove();
+            map = L.map('map').setView([data.faces[0].centroide.lat, data.faces[0].centroide.lng], 16);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+            let htmlLog = "";
+
+            for (let face of data.faces) {
+                const termoBusca = normalizarParaBusca(face.nome_logradouro);
+                const query = `[out:json];way["name"~"${termoBusca}",i](around:300,${face.centroide.lat},${face.centroide.lng});out geom;`;
+                
+                try {
+                    const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: query });
+                    const osm = await res.json();
+
+                    if (osm.elements && osm.elements.length > 0) {
+                        const via = osm.elements[0];
+                        
+                        // REQUISITO: Montar o conteúdo do arquivo conforme solicitado
+                        const conteudoExportacao = {
+                            sc_id_logradouro: face.sc_id_logradouro,
+                            nome_logradouro: face.nome_logradouro,
+                            osm_id: via.id,
+                            osm_name: via.tags.name || "N/A",
+                            geometry_wkt: formatarWKT(via.geometry)
+                        };
+
+                        // REQUISITO: Nome do arquivo = SC_ID_LOGRADOURO
+                        salvarJSON(conteudoExportacao, face.sc_id_logradouro);
+
+                        htmlLog += `
+                            <div class="face-card found">
+                                <span class="label">ID: ${face.sc_id_logradouro}</span>
+                                <b>${face.nome_logradouro}</b><br>
+                                <small style="color:green">Arquivo exportado com sucesso.</small>
+                            </div>`;
+
+                        L.polyline(via.geometry.map(p => [p.lat, p.lon]), {color: '#3498db'}).addTo(map);
+                    } else {
+                        htmlLog += `
+                            <div class="face-card not-found">
+                                <span class="label">ID: ${face.sc_id_logradouro}</span>
+                                <b>${face.nome_logradouro}</b><br>
+                                <small style="color:red">Via não encontrada no OSM.</small>
+                            </div>`;
+                    }
+                } catch (e) {
+                    console.error("Erro na face " + face.sc_id_logradouro, e);
+                }
+                // Delay para evitar bloqueio e permitir downloads múltiplos
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            container.innerHTML = htmlLog;
+        }
+    </script>
+</body>
+</html>

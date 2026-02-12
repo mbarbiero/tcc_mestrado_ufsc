@@ -6,39 +6,40 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: 'Segoe UI', sans-serif; }
-        #header { background: #1a252f; color: white; padding: 15px; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
-        #map { flex-grow: 1; width: 100%; }
-        .file-info { background: #34495e; padding: 8px 15px; border-radius: 4px; font-size: 13px; }
+        #header { background: #1a252f; color: white; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; z-index: 1000; }
+        #map-principal { flex-grow: 1; width: 100%; }
+        .file-info { background: rgba(255,255,255,0.1); padding: 5px 12px; border-radius: 4px; font-size: 12px; }
+        input[type="file"] { margin-left: 10px; font-size: 12px; color: white; }
     </style>
 </head>
 <body>
 
 <div id="header">
     <div>
-        <strong>📂 GEO Real | Capanema - PR:</strong>
+        <strong>📂 GEO Real:</strong>
         <input type="file" id="csvFile" accept=".csv">
     </div>
-    <div id="status" class="file-info">Aguardando arquivo CSV...</div>
+    <div id="status" class="file-info">Aguardando CSV...</div>
 </div>
 
-<div id="map"></div>
+<div id="map-principal"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
 <script>
-    const map = L.map('map').setView([-25.6575, -53.8108], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    const layerGroup = L.featureGroup().addTo(map);
+    const mapPrincipal = L.map('map-principal').setView([-25.6575, -53.8108], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapPrincipal);
+    const layerGroup = L.featureGroup().addTo(mapPrincipal);
 
     function extrairQuadrilatero(coords) {
-        if (coords.length <= 5) return coords.slice(0, 4);
+        if (!coords || coords.length < 3) return coords;
         let n = coords.reduce((a, b) => a[0] > b[0] ? a : b);
         let s = coords.reduce((a, b) => a[0] < b[0] ? a : b);
         let l = coords.reduce((a, b) => a[1] > b[1] ? a : b);
         let o = coords.reduce((a, b) => a[1] < b[1] ? a : b);
-        let vertices = [n, l, s, o];
-        const centro = [vertices.reduce((sum, p) => sum + p[0], 0)/4, vertices.reduce((sum, p) => sum + p[1], 0)/4];
+        let vertices = Array.from(new Set([n, l, s, o]));
+        const centro = [vertices.reduce((sum, p) => sum + p[0], 0)/vertices.length, vertices.reduce((sum, p) => sum + p[1], 0)/vertices.length];
         return vertices.sort((a, b) => Math.atan2(a[0]-centro[0], a[1]-centro[1]) - Math.atan2(b[0]-centro[0], b[1]-centro[1]));
     }
 
@@ -56,31 +57,36 @@
         const matches = wkt.match(/-?\d+\.\d+\s+-?\d+\.\d+/g);
         return matches ? matches.map(p => {
             const pts = p.split(/\s+/);
-            return [parseFloat(pts[1]), parseFloat(pts[0])]; 
+            return [parseFloat(pts[1]), parseFloat(pts[0])];
         }) : null;
     }
 
     function renderMap(results) {
         layerGroup.clearLayers();
-        const geoCol = results.meta.fields.find(c => c.toLowerCase().endsWith('.geometria'));
-        const codeCol = results.meta.fields.find(c => c.toLowerCase().endsWith('.codigo_cartografico'));
+        const geoCol = results.meta.fields.find(c => c.toLowerCase().includes('geometria'));
+        const codeCol = results.meta.fields.find(c => c.toLowerCase().includes('codigo_cartografico'));
+        const ruaCol = results.meta.fields.find(c => c.toLowerCase().includes('logradouro')) || "";
 
         results.data.forEach(row => {
             let coords = parseWKT(row[geoCol]);
             if (coords) {
                 const quad = extrairQuadrilatero(coords);
-                const poly = L.polygon(quad, { color: '#2980b9', weight: 1, fillOpacity: 0.4 });
-                poly.on('click', () => abrirJanelaGEOReal(row, quad, row[codeCol] || 'N/A'));
+                const poly = L.polygon(quad, { color: '#2980b9', weight: 2, fillOpacity: 0.3 });
+                poly.on('click', () => abrirJanelaGEOReal(row, quad, row[codeCol] || 'N/A', row[ruaCol] || 'Não informado'));
                 poly.addTo(layerGroup);
             }
         });
-        if (layerGroup.getLayers().length > 0) map.fitBounds(layerGroup.getBounds());
+        if (layerGroup.getLayers().length > 0) mapPrincipal.fitBounds(layerGroup.getBounds());
     }
 
-    function abrirJanelaGEOReal(dados, v, codigo) {
-        const win = window.open('', '_blank', 'width=820,height=650');
-        const wktExport = `POLYGON((${v.map(p => p[1] + " " + p[0]).join(",")},${v[0][1]} ${v[0][0]}))`;
+    function abrirJanelaGEOReal(dados, v, codigo, rua) {
+        // Define o tamanho exato da janela pop-up
+        const win = window.open('', '_blank', 'width=800,height=600,menubar=no,status=no,toolbar=no');
         
+        const vWKT = v.map(p => `${p[1].toFixed(8)} ${p[0].toFixed(8)}`);
+        vWKT.push(`${v[0][1].toFixed(8)} ${v[0][0].toFixed(8)}`);
+        const wktExport = `POLYGON((${vWKT.join(",")}))`;
+
         const html = `
 <!DOCTYPE html>
 <html>
@@ -88,69 +94,89 @@
     <title>GEO Real - ${codigo}</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; background: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Segoe UI', sans-serif; }
-        #map-container { width: 800px; height: 600px; position: relative; border: 2px solid #ccc; background: #fff; }
+        body { margin: 0; padding: 0; background: #fff; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        /* Container fixo em 800x600 */
+        #frame-container { width: 800px; height: 600px; position: relative; overflow: hidden; }
         #map { width: 100%; height: 100%; }
-        .info-panel { position: absolute; top: 15px; left: 15px; z-index: 1001; background: white; padding: 15px; border-radius: 4px; border-left: 5px solid #2980b9; width: 230px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .super-title { margin: 0; font-size: 13px; color: #2980b9; font-weight: bold; }
-        .main-title { margin: 0; font-size: 16px; color: #1a252f; }
-        .sub-title { margin: 2px 0 10px 0; font-size: 11px; color: #666; font-style: italic; }
-        .edge-label { background: #e91e63; color: white; padding: 2px 5px; border-radius: 3px; font-size: 11px; font-weight: bold; }
-        .btn { margin-top: 10px; width: 100%; padding: 8px; background: #333; color: white; border: none; cursor: pointer; font-size: 11px; border-radius: 3px; }
+        
+        .info-panel { 
+            position: absolute; top: 15px; left: 15px; z-index: 1001; 
+            background: rgba(255, 255, 255, 0.96); 
+            padding: 15px; border-radius: 4px; 
+            width: 240px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            border: 1px solid #ddd;
+        }
+
+        .btn-copy { 
+            margin-top: 12px; width: 100%; padding: 8px; background: #1a252f; color: white; 
+            border: none; cursor: pointer; font-size: 11px; border-radius: 3px; font-weight: bold;
+        }
+        .btn-copy:hover { background: #e91e63; }
+
+        .edge-label { background: #e91e63; color: white; padding: 1px 4px; border-radius: 3px; font-size: 10px; font-weight: bold; white-space: nowrap; border: 1px solid white; }
     </style>
 </head>
 <body>
-    <div id="map-container">
+    <div id="frame-container">
         <div class="info-panel">
-            <div class="super-title">SuperCIATA</div>
-            <h2 class="main-title">GEO Real</h2>
-            <div class="sub-title">Capanema - PR</div>
-            <p style="margin: 5px 0; font-size: 11px; color: #333;"><b>Quadra:</b> ${codigo}</p>
-            <div id="coords-list" style="margin-top:10px; font-size:10px; border-top:1px solid #eee; padding-top:5px;"></div>
-            <button class="btn" onclick="navigator.clipboard.writeText('${wktExport}'); alert('WKT Copiado!')">Copiar WKT (Simplificado)</button>
+            <div style="font-size: 11px; color: #2980b9; font-weight: bold;">SuperCIATA</div>
+            <h2 style="margin: 0; font-size: 18px; color: #1a252f;">GEO Real</h2>
+            <div id="info-content" style="font-size: 11px; color: #333; margin-top:8px;">
+                <b>Quadra:</b> <span id="label-codigo" style="word-break: break-all;">${codigo}</span><br>
+                <b>Rua Ref:</b> <span id="label-rua">${rua}</span>
+            </div>
+            <div id="coords-list" style="margin-top:10px; font-size:10px; border-top:1px solid #eee; padding-top:8px; max-height: 150px; overflow-y: auto;"></div>
+            <button class="btn-copy" id="btn-wkt">Copiar WKT</button>
         </div>
         <div id="map"></div>
     </div>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
     <script>
         const v = ${JSON.stringify(v)};
-        
-        // ZOOM FIXO EM 18
-        const map = L.map('map', { 
-            zoomControl: false, 
-            dragging: false, 
-            scrollWheelZoom: false,
-            minZoom: 18,
-            maxZoom: 18
-        });
+        const wktData = \`${wktExport}\`;
 
+        document.getElementById('btn-wkt').onclick = function() {
+            navigator.clipboard.writeText(wktData).then(() => {
+                const textOrig = this.innerText;
+                this.innerText = "COPIADO!";
+                setTimeout(() => { this.innerText = textOrig; }, 2000);
+            });
+        };
+
+        const map = L.map('map', { zoomControl: false, attributionControl: false });
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-        const poly = L.polygon(v, { color: '#e91e63', weight: 4, fillOpacity: 0.2 }).addTo(map);
-        const center = poly.getBounds().getCenter();
+        const poly = L.polygon(v, { color: '#e91e63', weight: 4, fillOpacity: 0.15 }).addTo(map);
         
-        // Centralização com offset ajustado para zoom 18
-        const latOffset = 0.00030; 
-        const lngOffset = -0.00050; 
-        
-        map.setView([center.lat + latOffset, center.lng + lngOffset], 18);
+        // Ajuste de padding para centralizar a quadra na área útil (direita) do frame 800x600
+        map.fitBounds(poly.getBounds(), { 
+            paddingTopLeft: [280, 100], 
+            paddingBottomRight: [50, 50] 
+        });
 
         let listHtml = "";
         v.forEach((p, i) => {
-            L.circleMarker(p, { radius: 6, color: '#333', fillColor: 'white', fillOpacity: 1, weight: 2 }).addTo(map);
+            L.circleMarker(p, { radius: 4, color: '#e91e63', fillColor: '#fff', fillOpacity: 1, weight: 2 }).addTo(map);
             const proximo = v[(i + 1) % v.length];
             const dist = L.latLng(p).distanceTo(L.latLng(proximo));
             const mid = [(p[0] + proximo[0])/2, (p[1] + proximo[1])/2];
             
-            L.marker(mid, { icon: L.divIcon({ className: 'edge-label', html: dist.toFixed(2) + 'm', iconSize: [55, 20] }) }).addTo(map);
-            listHtml += '<p style="margin:2px 0;"><b>V' + (i+1) + ':</b> ' + p[0].toFixed(7) + ', ' + p[1].toFixed(7) + '</p>';
+            L.marker(mid, { 
+                icon: L.divIcon({ 
+                    className: 'edge-label', 
+                    html: dist.toFixed(2) + 'm',
+                    iconSize: [55, 18],
+                    iconAnchor: [27, 9]
+                }) 
+            }).addTo(map);
+
+            listHtml += '<div>V' + (i+1) + ': ' + p[1].toFixed(7) + ', ' + p[0].toFixed(7) + '</div>';
         });
         document.getElementById('coords-list').innerHTML = listHtml;
 
-        window.onload = () => {
-            map.invalidateSize();
-            map.setView([center.lat + latOffset, center.lng + lngOffset], 18);
-        };
+        window.onload = () => { setTimeout(() => { map.invalidateSize(); }, 200); };
     <\/script>
 </body>
 </html>`;

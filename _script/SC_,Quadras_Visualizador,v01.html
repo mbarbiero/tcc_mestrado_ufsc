@@ -2,109 +2,138 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>SuperCIATA - Geometria de Quadras</title>
+    <title>SuperCIATA - GEO Real v3</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
-        #map { width: 100%; height: 100vh; background: #ddd; }
-        .label-dim {
-            background: rgba(255, 255, 255, 0.8);
-            border: 1px solid #666;
-            padding: 2px 5px;
-            border-radius: 3px;
-            font-size: 10px;
-            font-weight: bold;
-            white-space: nowrap;
-        }
+        body { margin: 0; background: #2c3e50; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; font-family: 'Segoe UI', sans-serif; }
+        #input-area { width: 800px; background: #fff; padding: 15px; border-radius: 8px 8px 0 0; box-sizing: border-box; border-bottom: 2px solid #eee; }
+        textarea { width: 100%; height: 60px; border: 1px solid #ccc; border-radius: 4px; padding: 8px; font-family: monospace; font-size: 11px; resize: none; }
+        .btn-generate { background: #2980b9; color: white; border: none; padding: 10px; width: 100%; border-radius: 4px; cursor: pointer; margin-top: 10px; font-weight: bold; }
+        #map-container { width: 800px; height: 600px; position: relative; background: #fff; box-shadow: 0 10px 30px rgba(0,0,0,0.3); display: none; }
+        #map { width: 100%; height: 100%; }
+        .info-panel { position: absolute; top: 15px; left: 15px; z-index: 1001; background: rgba(255, 255, 255, 0.95); padding: 15px; border-radius: 4px; border-left: 5px solid #2980b9; width: 240px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .edge-label { background: #2980b9; color: white; padding: 1px 4px; border-radius: 3px; font-size: 10px; font-weight: bold; border: 1px solid #fff; }
+        .btn-copy { margin-top: 10px; width: 100%; padding: 8px; background: #333; color: white; border: none; cursor: pointer; font-size: 11px; border-radius: 3px; }
     </style>
 </head>
 <body>
 
-<div id="map"></div>
+    <div id="input-area">
+        <textarea id="json-input" placeholder="Cole o JSON da quadra..."></textarea>
+        <button class="btn-generate" onclick="gerarGeoReal()">Gerar GEO Real</button>
+    </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
-const data = [
-  {
-    "sc_id_quadra": ["0E9A43FC", "37EBE4BB", "5C81EDF2", "EF2B51D7"],
-    "faces": [
-      { "ordem_face": 1, "dim_face": 127.38, "centroide": { "lat": -25.657144305, "lng": -53.810254861666664 } }
-    ],
-    // Simplificando: usaremos o centroide da face 1 para a quadra toda neste exemplo
-    "centroide_geral": { "lat": -25.657144, "lng": -53.810254 },
-    "dimensoes": [127.38, 122.76, 114.9, 132.78] // F1, F2, F3, F4
-  },
-  {
-    "sc_id_quadra": ["1558A9D1", "9003F37C", "F0D334EC", "F54DE0AF"],
-    "centroide_geral": { "lat": -25.680599, "lng": -53.802336 },
-    "dimensoes": [89.82, 100.22, 111.98, 82.44]
-  },
-  {
-    "sc_id_quadra": ["6B8E7F2D", "736565AB", "9E705E10", "E544EA7B"],
-    "centroide_geral": { "lat": -25.677154, "lng": -53.804776 },
-    "dimensoes": [119.76, 126.25, 109.99, 115.27]
-  }
-];
+    <div id="map-container">
+        <div class="info-panel">
+            <div style="font-size: 11px; color: #2980b9; font-weight: bold;">SuperCIATA</div>
+            <h2 style="margin: 0; font-size: 18px; color: #1a252f;">GEO Real</h2>
+            <div id="info-content" style="font-size: 11px; color: #333; margin-top:8px;">
+                <b>Quadra:</b> <span id="label-codigo" style="word-break: break-all;">-</span><br>
+                <b>Rua Ref:</b> <span id="label-rua">-</span>
+            </div>
+            <div id="coords-list" style="margin-top:10px; font-size:10px; border-top:1px solid #eee; padding-top:8px; max-height: 150px; overflow-y: auto;"></div>
+            <button class="btn-copy" id="btn-wkt">Copiar WKT</button>
+        </div>
+        <div id="map"></div>
+    </div>
 
-// Inicializar Mapa
-const map = L.map('map').setView([-25.67, -53.80], 14);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-}).addTo(map);
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let map;
+        const R = 6378137;
 
-// Função para converter metros em diferença de Lat/Lng (aproximação local)
-function metersToCoords(lat, mLat, mLng) {
-    const latDiff = mLat / 111320; 
-    const lngDiff = mLng / (111320 * Math.cos(lat * (Math.PI / 180)));
-    return [latDiff, lngDiff];
-}
+        async function gerarGeoReal() {
+            const input = document.getElementById('json-input').value;
+            if(!input) return;
+            try {
+                const data = JSON.parse(input);
+                const f1 = data.faces.find(f => f.ordem_face === 1);
+                const f3 = data.faces.find(f => f.ordem_face === 3);
 
-data.forEach(q => {
-    const c = q.centroide_geral;
-    const [w1, h2, w3, h4] = q.dimensoes;
+                document.getElementById('label-codigo').innerText = data.sc_id_quadra;
+                document.getElementById('label-rua').innerText = f1.nome_logradouro;
+                document.getElementById('map-container').style.display = 'block';
 
-    // Cálculo dos offsets em metros baseados no centroide
-    // Face 1 no topo (Norte), horizontal
-    const offTop = metersToCoords(c.lat, h4/2, w1/2);
-    const offBottom = metersToCoords(c.lat, -h2/2, w3/2);
+                const osmNodes = await fetchOSM(f1.centroide, f1.nome_logradouro);
+                const streetAngle = calculateAngle(osmNodes, f1.centroide);
+                
+                // Determina se a Face 3 está à "esquerda" ou "direita" do vetor da rua
+                // para decidir se projeta para um lado ou para o outro
+                const vertices = computeVertices(f1.centroide, f3.centroide, data.faces, streetAngle);
+                
+                renderMap(vertices);
+            } catch (e) { alert("Erro: " + e.message); }
+        }
 
-    const p1 = [c.lat + offTop[0], c.lng - offTop[1]]; // Sup Esq
-    const p2 = [c.lat + offTop[0], c.lng + offTop[1]]; // Sup Dir
-    const p3 = [c.lat - offBottom[0], c.lng + offBottom[1]]; // Inf Dir
-    const p4 = [c.lat - offBottom[0], c.lng - offBottom[1]]; // Inf Esq
+        async function fetchOSM(c, rua) {
+            const query = `[out:json];way["name"~"${rua}",i](around:100,${c.lat},${c.lng});out geom;`;
+            const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: query });
+            const d = await res.json();
+            if(!d || !d.elements.length) throw new Error("Rua não encontrada no OSM");
+            const g = d.elements[0].geometry;
+            return g.sort((a,b) => Math.hypot(a.lat-c.lat, a.lon-c.lng) - Math.hypot(b.lat-c.lat, b.lon-c.lng)).slice(0,2);
+        }
 
-    const polygon = L.polygon([p1, p2, p3, p4], {
-        color: '#e74c3c',
-        weight: 3,
-        fillColor: '#f1c40f',
-        fillOpacity: 0.4
-    }).addTo(map);
+        function calculateAngle(pts, c) {
+            return Math.atan2(pts[1].lat - pts[0].lat, (pts[1].lon - pts[0].lon) * Math.cos(c.lat * Math.PI / 180));
+        }
 
-    // Adicionar etiquetas de dimensão nos pontos médios das arestas
-    const midPoints = [
-        { pos: [(p1[0]+p2[0])/2, (p1[1]+p2[1])/2], val: w1 + "m (F1)" },
-        { pos: [(p2[0]+p3[0])/2, (p2[1]+p3[1])/2], val: h2 + "m (F2)" },
-        { pos: [(p3[0]+p4[0])/2, (p3[1]+p4[1])/2], val: w3 + "m (F3)" },
-        { pos: [(p4[0]+p1[0])/2, (p4[1]+p1[1])/2], val: h4 + "m (F4)" }
-    ];
+        function computeVertices(c1, c3, faces, angle) {
+            const d = {}; faces.forEach(f => d[f.ordem_face] = f.dim_face);
+            
+            const project = (dn, de) => {
+                const re = de * Math.cos(angle) - dn * Math.sin(angle);
+                const rn = de * Math.sin(angle) + dn * Math.cos(angle);
+                return [c1.lat + (rn/R)*(180/Math.PI), c1.lng + (re/(R*Math.cos(c1.lat*Math.PI/180)))*(180/Math.PI)];
+            };
 
-    midPoints.forEach(m => {
-        L.marker(m.pos, {
-            icon: L.divIcon({
-                className: 'label-dim',
-                html: m.val,
-                iconSize: [60, 20]
-            })
-        }).addTo(map);
-    });
+            // Vértices da base (Face 1)
+            const p1 = project(0, -d[1]/2);
+            const p2 = project(0, d[1]/2);
 
-    polygon.bindPopup(`<b>Quadra:</b><br>${q.sc_id_quadra.join(', ')}`);
-});
+            // Testamos a projeção para "frente" (1) e "trás" (-1)
+            // e verificamos qual fica mais próxima do centroide real da Face 3
+            const testV3_pos = project(d[2], d[1]/2);
+            const testV3_neg = project(-d[2], d[1]/2);
+            
+            const distPos = Math.hypot(testV3_pos[0] - c3.lat, testV3_pos[1] - c3.lng);
+            const distNeg = Math.hypot(testV3_neg[0] - c3.lat, testV3_neg[1] - c3.lng);
+            
+            const dir = distPos < distNeg ? 1 : -1;
 
-// Ajustar zoom para ver todas as quadras
-const group = new L.featureGroup(map._layers);
-if (Object.keys(map._layers).length > 1) map.fitBounds(polygon.getBounds());
+            const v3 = project(dir * d[2], d[1]/2);
+            const v4 = project(dir * d[4], -d[1]/2);
 
-</script>
+            // Retorna em ordem anti-horária garantida usando cross product simples
+            const poly = [p1, p2, v3, v4];
+            const area = poly.reduce((acc, curr, i) => {
+                const next = poly[(i + 1) % poly.length];
+                return acc + (next[1] - curr[1]) * (next[0] + curr[0]);
+            }, 0);
+            
+            return area > 0 ? poly : [p1, v4, v3, p2];
+        }
+
+        function renderMap(v) {
+            if(map) map.remove();
+            map = L.map('map', { zoomControl: false, attributionControl: false });
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            const poly = L.polygon(v, { color: '#2980b9', weight: 4, fillOpacity: 0.3 }).addTo(map);
+            map.fitBounds(poly.getBounds(), { padding: [80, 80] });
+
+            let html = "";
+            v.forEach((p, i) => {
+                L.circleMarker(p, { radius: 4, color: '#1a252f', fillColor: '#fff', fillOpacity: 1 }).addTo(map);
+                const next = v[(i + 1) % v.length];
+                const mid = [(p[0] + next[0])/2, (p[1] + next[1])/2];
+                const dist = L.latLng(p).distanceTo(L.latLng(next));
+                L.marker(mid, { icon: L.divIcon({ className: 'edge-label', html: dist.toFixed(1)+'m', iconSize:[45,18] }) }).addTo(map);
+                html += `V${i+1}: ${p[0].toFixed(6)}, ${p[1].toFixed(6)}<br>`;
+            });
+            document.getElementById('coords-list').innerHTML = html;
+            const wkt = `POLYGON((${v.map(p => `${p[1].toFixed(7)} ${p[0].toFixed(7)}`).join(', ')}, ${v[0][1].toFixed(7)} ${v[0][0].toFixed(7)}))`;
+            document.getElementById('btn-wkt').onclick = () => { navigator.clipboard.writeText(wkt); alert("WKT Copiado!"); };
+        }
+    </script>
 </body>
 </html>
