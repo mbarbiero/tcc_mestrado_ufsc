@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Calculador de Geometria - SuperCIATA</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 20px; background: #f8f9fa; }
+        .container { display: flex; gap: 20px; max-width: 1200px; margin: auto; }
+        .panel { width: 350px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        #map { flex: 1; height: 550px; border-radius: 8px; border: 2px solid #004a8d; }
+        input { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #004a8d; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .result-box { margin-top: 15px; padding: 15px; background: #e3f2fd; border-left: 5px solid #2196f3; font-size: 0.9em; }
+        h3 { color: #004a8d; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="panel">
+        <h3>Calculador de Segmento</h3>
+        
+        <label>Ponto 1 (Lat, Lon):</label>
+        <input type="text" id="p1" placeholder="-25.4411, -54.5733">
+        
+        <label>Ponto 2 (Lat, Lon):</label>
+        <input type="text" id="p2" placeholder="-25.4420, -54.5740">
+        
+        <button onclick="calcular()">Calcular e Plotar</button>
+
+        <div id="resultados" class="result-box" style="display:none;">
+            <strong>Centroide:</strong><br>
+            <span id="resCentroide"></span><br><br>
+            <strong>Azimute (Rotação):</strong><br>
+            <span id="resAzimute"></span>°
+        </div>
+    </div>
+
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView([-25.44, -54.57], 16);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    let layerGroup = L.layerGroup().addTo(map);
+
+    function calcular() {
+        const p1Raw = document.getElementById('p1').value.split(',').map(Number);
+        const p2Raw = document.getElementById('p2').value.split(',').map(Number);
+
+        if (p1Raw.length < 2 || p2Raw.length < 2) {
+            alert("Preencha ambos os pontos corretamente.");
+            return;
+        }
+
+        // 1. Cálculo do Centroide (Média Aritmética)
+        const centroideLat = (p1Raw[0] + p2Raw[0]) / 2;
+        const centroideLon = (p1Raw[1] + p2Raw[1]) / 2;
+
+        // 2. Cálculo do Azimute (Ângulo em relação ao Norte/Eixo Y)
+        const dLon = p2Raw[1] - p1Raw[1];
+        const dLat = p2Raw[0] - p1Raw[0];
+        let azimute = Math.atan2(dLon, dLat) * (180 / Math.PI);
+
+        // Exibir resultados
+        document.getElementById('resCentroide').innerText = `${centroideLat.toFixed(7)}, ${centroideLon.toFixed(7)}`;
+        document.getElementById('resAzimute').innerText = azimute.toFixed(4);
+        document.getElementById('resultados').style.display = 'block';
+
+        plotar(p1Raw, p2Raw, [centroideLat, centroideLon]);
+    }
+
+    function plotar(p1, p2, centro) {
+        layerGroup.clearLayers();
+
+        // Linha do logradouro
+        const line = L.polyline([p1, p2], {color: '#004a8d', weight: 4}).addTo(layerGroup);
+        
+        // Marcadores
+        L.circleMarker(p1, {radius: 5, color: 'black'}).addTo(layerGroup).bindPopup("P1");
+        L.circleMarker(p2, {radius: 5, color: 'black'}).addTo(layerGroup).bindPopup("P2");
+        
+        // Centroide em destaque (Vermelho)
+        L.marker(centro).addTo(layerGroup)
+            .bindPopup(`Centroide: ${centro[0].toFixed(5)}, ${centro[1].toFixed(5)}`)
+            .openPopup();
+
+        map.fitBounds(line.getBounds().pad(0.5));
+    }
+</script>
+</body>
+</html>

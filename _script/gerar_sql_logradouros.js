@@ -1,42 +1,49 @@
 const fs = require('fs');
 const path = require('path');
 
-// Configuração de caminhos
+// Configurações de caminhos
 const diretorioOrigem = 'C:\\Users\\qto\\OneDrive\\Documentos\\Mestrado\\TCC\\Dados\\Capanema\\OSM_LOGRADOUROS';
-const arquivoSaida = 'importar_osm_logradouros.sql';
+const arquivoSaida = 'C:\\Users\\qto\\OneDrive\\Documentos\\Mestrado\\TCC\\Dados\\Capanema\\inserir_logradouros.sql';
 
-// Função para tratar aspas simples em nomes (Ex: D'Oeste -> D''Oeste)
-const escapeSQL = (str) => str ? str.replace(/'/g, "''") : "";
-
-function gerarSQL() {
+// Função para processar os arquivos
+function processarArquivos() {
     try {
-        const arquivos = fs.readdirSync(diretorioOrigem);
-        const jsonArquivos = arquivos.filter(file => path.extname(file).toLowerCase() === '.json');
+        const arquivos = fs.readdirSync(diretorioOrigem).filter(file => file.endsWith('.json'));
+        
+        if (arquivos.length === 0) {
+            console.log("Nenhum arquivo JSON encontrado na pasta.");
+            return;
+        }
 
-        console.log(`Encontrados ${jsonArquivos.length} arquivos para processar.`);
+        let valoresSql = [];
 
-        let sqlContent = `-- Script de Importação gerado em ${new Date().toLocaleString()}\n`;
-        sqlContent += `USE seu_nome_do_banco; -- AJUSTE O NOME DO SEU BANCO AQUI\n\n`;
-
-        jsonArquivos.forEach(arquivo => {
+        arquivos.forEach(arquivo => {
             const caminhoCompleto = path.join(diretorioOrigem, arquivo);
-            const rawData = fs.readFileSync(caminhoCompleto);
-            const data = JSON.parse(rawData);
+            const conteudo = JSON.parse(fs.readFileSync(caminhoCompleto, 'utf8'));
 
-            // Montagem do comando INSERT para MariaDB 10.2
-            // ST_GeomFromText(WKT, SRID)
-            const query = `INSERT INTO OSM_LOGRADOUROS (OSM_ID, SC_ID_LOGRADOURO, NOM_LOGRADOURO, OSM_NOM_LOGRADOURO, GEOMETRIA) 
-VALUES (${data.osm_id}, '${data.sc_id_logradouro}', '${escapeSQL(data.nome_logradouro)}', '${escapeSQL(data.osm_name)}', ST_GeomFromText('${data.geometry_wkt}', 4326));\n`;
+            // Escapar aspas simples em nomes para evitar erro no SQL
+            const nomeSolicitado = (conteudo.logradouro || conteudo.nome_solicitado || '').replace(/'/g, "''");
+            const nomeOsm = (conteudo.osm_nom_logradouro || conteudo.nome_osm || '').replace(/'/g, "''");
+            const scId = conteudo.SC_ID_LOGRADOURO || conteudo.sc_id_logradouro || '';
+            const osmId = conteudo.osm_id || conteudo.OSM_ID;
+            const wkt = conteudo.wkt || conteudo.WKT;
 
-            sqlContent += query;
+            if (wkt) {
+                // Formatação para MySQL (usando ST_GeomFromText)
+                // Se for outro banco (PostGIS), a sintaxe é similar
+                valoresSql.push(`(${osmId}, '${scId}', '${nomeSolicitado}', '${nomeOsm}', ST_GeomFromText('${wkt}'))`);
+            }
         });
 
-        fs.writeFileSync(arquivoSaida, sqlContent);
-        console.log(`✅ Sucesso! Arquivo '${arquivoSaida}' criado com todos os comandos INSERT.`);
+        const sqlFinal = `INSERT INTO OSM_LOGRADOUROS (OSM_ID, SC_ID_LOGRADOURO, NOM_LOGRADOURO, OSM_NOM_LOGRADOURO, GEOMETRIA)\nVALUES\n${valoresSql.join(',\n')};`;
+
+        fs.writeFileSync(arquivoSaida, sqlFinal);
+        console.log(`Sucesso! Script SQL gerado: ${arquivoSaida}`);
+        console.log(`Total de registros: ${valoresSql.length}`);
 
     } catch (err) {
-        console.error("Erro ao processar arquivos:", err.message);
+        console.error("Erro ao processar:", err);
     }
 }
 
-gerarSQL();
+processarArquivos();

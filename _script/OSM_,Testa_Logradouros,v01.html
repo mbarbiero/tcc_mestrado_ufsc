@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Teste de Segmento - SuperCIATA</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 20px; background: #f0f2f5; }
+        .main-container { display: flex; gap: 20px; max-width: 1200px; margin: auto; }
+        .panel { width: 380px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #map { flex: 1; height: 600px; border-radius: 8px; border: 2px solid #004a8d; }
+        input, button { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ccc; border-radius: 4px; }
+        button { background: #004a8d; color: white; font-weight: bold; border: none; cursor: pointer; }
+        button:hover { background: #003366; }
+        pre { background: #282c34; color: #abb2bf; padding: 15px; border-radius: 5px; font-size: 11px; max-height: 250px; overflow: auto; }
+        .error-msg { color: #d32f2f; background: #ffcdd2; padding: 10px; border-radius: 4px; margin-top: 10px; font-size: 13px; display: none; }
+        .success-msg { color: #2e7d32; background: #c8e6c9; padding: 10px; border-radius: 4px; margin-top: 10px; font-size: 13px; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="main-container">
+    <div class="panel">
+        <h3>SuperCIATA - Validação</h3>
+        <p><small>Teste de Rotação/Translação via Logradouro</small></p>
+        
+        <label>SC_ID_LOGRADOURO:</label>
+        <input type="text" id="sc_id" value="0054">
+        
+        <label>Coordenada da Quadra (Lat, Long):</label>
+        <input type="text" id="latlng" placeholder="-25.4411, -54.5733">
+        
+        <button onclick="testarAPI()">Processar Geometria</button>
+
+        <div id="msgError" class="error-msg"></div>
+        <div id="msgSuccess" class="success-msg"></div>
+
+        <label>Resposta JSON:</label>
+        <pre id="jsonResponse">Aguardando execução...</pre>
+    </div>
+
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView([-25.44, -54.57], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    let layerGroup = L.layerGroup().addTo(map);
+
+    async function testarAPI() {
+        const sc_id = document.getElementById('sc_id').value;
+        const latlngStr = document.getElementById('latlng').value;
+        const errBox = document.getElementById('msgError');
+        const successBox = document.getElementById('msgSuccess');
+        const jsonPre = document.getElementById('jsonResponse');
+
+        // Reset
+        errBox.style.display = 'none';
+        successBox.style.display = 'none';
+        jsonPre.innerText = "Chamando API...";
+
+        const partes = latlngStr.split(',').map(p => p.trim());
+        if (partes.length !== 2) {
+            alert("Formato de coordenada inválido. Use: lat, long");
+            return;
+        }
+
+        // ROTA DEFINIDA NO SEU SERVIDOR
+        const url = `https://smuu.com.br:21079/superciata/pontos_por_logradouro?sc_id=${sc_id}&lat=${partes[0]}&lng=${partes[1]}&t=${Date.now()}`;
+
+        try {
+            const response = await fetch(url);
+            
+            if (!response.ok) throw new Error(`Status: ${response.status}`);
+
+            const data = await response.json();
+            jsonPre.innerText = JSON.stringify(data, null, 2);
+
+            if (data.sucesso) {
+                successBox.innerText = "Conexão OK! Segmento identificado.";
+                successBox.style.display = 'block';
+                plotar(data.segmento_proximo, [partes[0], partes[1]]);
+            } else {
+                throw new Error(data.mensagem);
+            }
+
+        } catch (error) {
+            errBox.style.display = 'block';
+            errBox.innerHTML = `<strong>Erro de Conexão:</strong><br>${error.message}<br><br>
+            Se for erro de SSL, <a href="${url}" target="_blank">clique aqui</a> e autorize o certificado no navegador.`;
+            jsonPre.innerText = "Falha no fetch.";
+        }
+    }
+
+    function plotar(segmento, origem) {
+        layerGroup.clearLayers();
+        const p1 = segmento[0]; // [lat, lon]
+        const p2 = segmento[1];
+
+        // Marcador do ponto fornecido (Centroide)
+        L.marker(origem).addTo(layerGroup).bindPopup("Centroide Original").openPopup();
+
+        // Linha do segmento OSM
+        const line = L.polyline([p1, p2], {color: 'red', weight: 5}).addTo(layerGroup);
+        
+        // Vértices do segmento
+        L.circleMarker(p1, {radius: 4, color: 'blue'}).addTo(layerGroup);
+        L.circleMarker(p2, {radius: 4, color: 'blue'}).addTo(layerGroup);
+
+        map.fitBounds(line.getBounds().pad(1));
+    }
+</script>
+</body>
+</html>

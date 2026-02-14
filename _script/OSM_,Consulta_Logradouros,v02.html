@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Extrator CSV v08</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        body { margin: 0; background: #1a1a1a; color: white; display: flex; flex-direction: column; align-items: center; min-height: 100vh; font-family: 'Segoe UI', sans-serif; }
+        #header { width: 950px; background: #2c3e50; padding: 20px; border-radius: 8px; margin-top: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); text-align: center; }
+        .file-input-container { background: #34495e; padding: 15px; border-radius: 4px; margin-bottom: 10px; border: 2px dashed #3498db; }
+        .btn-main { background: #27ae60; color: white; border: none; padding: 15px 30px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 16px; width: 100%; transition: 0.3s; }
+        .btn-main:hover { background: #219150; }
+        .btn-main:disabled { background: #7f8c8d; cursor: not-allowed; }
+        
+        #dashboard { display: grid; grid-template-columns: 400px 1fr; gap: 15px; width: 98%; margin-top: 15px; flex-grow: 1; margin-bottom: 20px; }
+        #status-container { background: #2c3e50; padding: 15px; border-radius: 8px; overflow-y: auto; max-height: 750px; border: 1px solid #444; }
+        #map { background: #ddd; border-radius: 8px; height: 750px; border: 2px solid #27ae60; }
+        
+        .FACE-card { background: #34495e; padding: 12px; border-radius: 5px; margin-bottom: 10px; border-left: 6px solid #7f8c8d; font-size: 13px; }
+        .found { border-left-color: #27ae60; }
+        .skipped { border-left-color: #3498db; opacity: 0.8; }
+        .timer-box { background: #f39c12; color: black; padding: 8px; border-radius: 4px; font-weight: bold; margin-bottom: 10px; text-align: center; }
+    </style>
+</head>
+
+<body>
+
+    <div id="header">
+        <h2 style="margin:0; color: #3498db;">SuperCIATA - Processador CSV (Capanema)</h2>
+        <p>Lendo: OSM_,Logradouros_análise.Capanema.csv | Delay: 30s</p>
+        
+        <div class="file-input-container">
+            <input type="file" id="csv-file" accept=".csv">
+        </div>
+        
+        <button class="btn-main" id="btn-start" onclick="processarCSV()">CARREGAR CSV E INICIAR CONSULTAS</button>
+    </div>
+
+    <div id="dashboard" style="display:none;">
+        <div id="status-container">
+            <div id="timer-display" class="timer-box" style="display:none;">Aguardando...</div>
+            <div id="log-content"></div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let map;
+        const processados = new Set();
+
+        function salvarJSON(objeto, nomeArquivo) {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(objeto, null, 2));
+            const dlAnchor = document.createElement('a');
+            dlAnchor.setAttribute("href", dataStr);
+            dlAnchor.setAttribute("download", nomeArquivo + ".json");
+            document.body.appendChild(dlAnchor);
+            dlAnchor.click();
+            dlAnchor.remove();
+        }
+
+        async function countdown(segundos) {
+            const timerDisplay = document.getElementById('timer-display');
+            timerDisplay.style.display = 'block';
+            for (let i = segundos; i > 0; i--) {
+                timerDisplay.innerText = `Próxima consulta em: ${i}s`;
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            timerDisplay.style.display = 'none';
+        }
+
+        function processarCSV() {
+            const fileInput = document.getElementById('csv-file');
+            if (!fileInput.files[0]) {
+                alert("Por favor, selecione o arquivo CSV primeiro.");
+                return;
+            }
+
+            Papa.parse(fileInput.files[0], {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    iniciarExecucao(results.data);
+                }
+            });
+        }
+
+        async function iniciarExecucao(listaLogradouros) {
+            const btn = document.getElementById('btn-start');
+            btn.disabled = true;
+            btn.innerText = "PROCESSANDO " + listaLogradouros.length + " LINHAS...";
+            
+            const logContent = document.getElementById('log-content');
+            document.getElementById('dashboard').style.display = 'grid';
+
+            if (map) map.remove();
+            map = L.map('map').setView([-25.6698, -53.8075], 14);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+            for (let i = 0; i < listaLogradouros.length; i++) {
+                const item = listaLogradouros[i];
+                const scId = item.SC_ID_LOGRADOURO;
+                const nomOriginal = item.NOM_LOGRADOURO;
+                const nomBusca = item.OSM_NOM_LOGRADOURO; // Usaremos este campo para a query conforme solicitado
+
+                if (!nomBusca) continue;
+
+                // CONTROLO DE REPETIÇÃO baseado no NOME DE BUSCA
+                if (processados.has(nomBusca)) {
+                    logContent.innerHTML += `<div class="FACE-card skipped"><b>${nomOriginal}</b><br><small>Ignorado (Já processado).</small></div>`;
+                    continue;
+                }
+
+                logContent.innerHTML += `<div id="card-${i}" class="FACE-card">Consultando: ${nomBusca}...</div>`;
+                
+                // Query Overpass com o OSM_NOM_LOGRADOURO
+                const query = `[out:json][timeout:90];area[name="Capanema"]->.a;way(area.a)["name"~"${nomBusca}",i];out geom;`;
+
+                try {
+                    const res = await fetch("https://overpass-api.de/api/interpreter", {
+                        method: "POST",
+                        body: query
+                    });
+                    const osm = await res.json();
+                    const card = document.getElementById(`card-${i}`);
+
+                    if (osm.elements && osm.elements.length > 0) {
+                        osm.elements.forEach(via => {
+                            const exportData = {
+                                CI_ID_QUADRA: "", // Espaço reservado para manter padrão
+                                SC_ID_LOGRADOURO: scId,
+                                NOM_LOGRADOURO: nomOriginal,
+                                OSM_NOM_LOGRADOURO: nomBusca,
+                                OSM_ID: via.id,
+                                WKT: `LINESTRING (${via.geometry.map(p => `${p.lon} ${p.lat}`).join(", ")})`
+                            };
+                            
+                            // Nome do arquivo com as novas informações
+                            const nomeArquivo = `${nomBusca.replace(/\s/g, '_')}_${scId}_${via.id}`;
+                            salvarJSON(exportData, nomeArquivo);
+                            
+                            L.polyline(via.geometry.map(p => [p.lat, p.lon]), { color: '#27ae60', weight: 4 }).addTo(map);
+                        });
+                        
+                        card.className = "FACE-card found";
+                        card.innerHTML = `<b>${nomOriginal}</b><br><small>Sucesso: ${osm.elements.length} via(s) exportada(s).</small>`;
+                        processados.add(nomBusca);
+                    } else {
+                        card.innerHTML = `<b>${nomOriginal}</b><br><small style="color:#e74c3c">Não encontrado como "${nomBusca}".</small>`;
+                    }
+                } catch (e) {
+                    console.error("Erro:", e);
+                }
+
+                // Delay de 30s
+                if (i < listaLogradouros.length - 1) {
+                    await countdown(30);
+                }
+            }
+            btn.innerText = "PROCESSO FINALIZADO";
+        }
+    </script>
+</body>
+</html>

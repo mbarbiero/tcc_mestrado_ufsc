@@ -1,38 +1,36 @@
 <!DOCTYPE html>
 <html lang="pt-br">
+
 <head>
     <meta charset="UTF-8">
-    <title>SuperCIATA - Exportador de Logradouros OSM</title>
+    <title>SuperCIATA - Extrator OSM v04</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; background: #1a1a1a; color: white; display: flex; flex-direction: column; align-items: center; min-height: 100vh; font-family: 'Segoe UI', sans-serif; }
-        #input-area { width: 950px; background: #2c3e50; padding: 20px; border-radius: 8px 8px 0 0; margin-top: 10px; }
-        textarea { width: 100%; height: 100px; border-radius: 4px; padding: 10px; font-family: monospace; font-size: 12px; border: none; resize: none; color: #333; }
-        .btn-main { background: #e67e22; color: white; border: none; padding: 15px; width: 100%; border-radius: 4px; cursor: pointer; margin-top: 10px; font-weight: bold; text-transform: uppercase; transition: 0.3s; }
-        .btn-main:disabled { background: #7f8c8d; }
-        
-        #dashboard { width: 950px; display: grid; grid-template-columns: 350px 1fr; background: #fff; border-radius: 0 0 8px 8px; overflow: hidden; display: none; }
-        #side-panel { padding: 20px; color: #333; border-right: 1px solid #ddd; overflow-y: auto; max-height: 600px; }
-        #map { height: 600px; background: #e5e5e5; }
-
-        .face-card { font-size: 11px; padding: 10px; margin-bottom: 10px; border-radius: 4px; border-left: 5px solid #ccc; background: #f9f9f9; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        #input-area { width: 950px; background: #2c3e50; padding: 20px; border-radius: 8px; margin-top: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        textarea { width: 100%; height: 120px; border-radius: 4px; padding: 10px; font-family: monospace; font-size: 12px; border: none; box-sizing: border-box; color: #333; }
+        .btn-main { background: #27ae60; color: white; border: none; padding: 15px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 10px; width: 100%; transition: 0.3s; }
+        .btn-main:hover { background: #219150; }
+        #dashboard { display: grid; grid-template-columns: 380px 1fr; gap: 15px; width: 98%; margin-top: 10px; flex-grow: 1; margin-bottom: 20px; }
+        #status-container { background: #2c3e50; padding: 15px; border-radius: 8px; overflow-y: auto; max-height: 700px; border: 1px solid #444; }
+        #map { background: #ddd; border-radius: 8px; height: 700px; border: 2px solid #27ae60; }
+        .FACE-card { background: #34495e; padding: 12px; border-radius: 5px; margin-bottom: 10px; border-left: 6px solid #7f8c8d; font-size: 12px; }
         .found { border-left-color: #27ae60; }
-        .not-found { border-left-color: #c0392b; }
-        .label { font-weight: bold; color: #d35400; font-size: 10px; text-transform: uppercase; display: block; margin-top: 5px; }
+        .not-found { border-left-color: #e74c3c; }
+        .label-id { display: block; color: #f39c12; font-weight: bold; font-size: 10px; }
     </style>
 </head>
+
 <body>
 
     <div id="input-area">
-        <textarea id="json-input" placeholder="Cole o JSON com as faces aqui..."></textarea>
-        <button id="btn-executar" class="btn-main" onclick="processarEExportar()">Gerar Arquivos por Logradouro</button>
+        <h2 style="margin:0 0 10px 0; color: #27ae60;">SuperCIATA - Extrator Resiliente v04</h2>
+        <textarea id="json-input" placeholder='Cole o JSON das quadras aqui...'></textarea>
+        <button class="btn-main" onclick="processarEExportar()">INICIAR BUSCA (TRATAMENTO DE PISTAS DUPLAS)</button>
     </div>
 
-    <div id="dashboard">
-        <div id="side-panel">
-            <b style="color: #2c3e50;">LOG DE EXPORTAÇÃO</b>
-            <div id="status-container" style="margin-top: 10px;"></div>
-        </div>
+    <div id="dashboard" style="display:none;">
+        <div id="status-container"></div>
         <div id="map"></div>
     </div>
 
@@ -40,89 +38,105 @@
     <script>
         let map;
 
-        function normalizarParaBusca(t) {
-            return t.toUpperCase()
-                .replace(/RUA |AVENIDA |AV\. |TRAVESSA |DR\. |CEL\. /gi, "").trim()
-                .replace(/[AÁÀÂÃ]/g, "[AÁÀÂÃ]").replace(/[EÉÈÊ]/g, "[EÉÈÊ]")
-                .replace(/[IÍÌÎ]/g, "[IÍÌÎ]").replace(/[OÓÒÔÕ]/g, "[OÓÒÔÕ]")
-                .replace(/[UÚÙÛ]/g, "[UÚÙÛ]").replace(/[CÇ]/g, "[CÇ]");
+        function salvarJSON(objeto, nomeArquivo) {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(objeto, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", nomeArquivo + ".json");
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
         }
 
-        // Converte geometria OSM para WKT LINESTRING
         function formatarWKT(geometry) {
-            const pontos = geometry.map(p => `${p.lon.toFixed(8)} ${p.lat.toFixed(8)}`).join(', ');
-            return `LINESTRING (${pontos})`;
+            if (!geometry) return "";
+            const coords = geometry.map(p => `${p.lon} ${p.lat}`).join(", ");
+            return `LINESTRING (${coords})`;
         }
 
-        function salvarJSON(obj, nomeArquivo) {
-            const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `${nomeArquivo}.json`;
-            link.click();
+        // FUNÇÃO CRUCIAL: Limpa "AV.", "RUA", "R." e pontos para a busca ser ampla
+        function limparNomeParaBusca(nome) {
+            return nome.toUpperCase()
+                .replace(/AV\.|AVENIDA|RUA|R\.|DR\.|PROFR\./g, "")
+                .replace(/\./g, "")
+                .trim();
         }
 
         async function processarEExportar() {
             const input = document.getElementById('json-input').value;
-            if(!input) return;
+            if (!input) return;
 
-            const data = JSON.parse(input);
+            let dadosQuadras;
+            try {
+                dadosQuadras = JSON.parse(input);
+            } catch (e) {
+                alert("Erro no JSON.");
+                return;
+            }
+
             const container = document.getElementById('status-container');
-            container.innerHTML = "Processando faces...";
             document.getElementById('dashboard').style.display = 'grid';
+            container.innerHTML = "<b>Iniciando processamento...</b><hr>";
 
-            if(map) map.remove();
-            map = L.map('map').setView([data.faces[0].centroide.lat, data.faces[0].centroide.lng], 16);
+            if (map) map.remove();
+            const pRef = dadosQuadras[0].FACES[0].CENTROIDE;
+            map = L.map('map').setView([pRef[0], pRef[1]], 16);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-            let htmlLog = "";
+            for (let quadra of dadosQuadras) {
+                for (let face of quadra.FACES) {
+                    const nomeOriginal = face.CI_NOM_LOGRADOURO;
+                    const nomeBusca = limparNomeParaBusca(nomeOriginal);
+                    const lat = face.CENTROIDE[0];
+                    const lng = face.CENTROIDE[1];
 
-            for (let face of data.faces) {
-                const termoBusca = normalizarParaBusca(face.nome_logradouro);
-                const query = `[out:json];way["name"~"${termoBusca}",i](around:300,${face.centroide.lat},${face.centroide.lng});out geom;`;
-                
-                try {
-                    const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: query });
-                    const osm = await res.json();
+                    // Query Overpass: Busca pelo nome limpo (Ex: "PARANA") com case-insensitive
+                    // Aumentamos o raio para 400m para captar pistas duplas distantes
+                    const query = `[out:json];way["name"~"${nomeBusca}",i](around:400,${lat},${lng});out geom;`;
 
-                    if (osm.elements && osm.elements.length > 0) {
-                        const via = osm.elements[0];
-                        
-                        // REQUISITO: Montar o conteúdo do arquivo conforme solicitado
-                        const conteudoExportacao = {
-                            sc_id_logradouro: face.sc_id_logradouro,
-                            nome_logradouro: face.nome_logradouro,
-                            osm_id: via.id,
-                            osm_name: via.tags.name || "N/A",
-                            geometry_wkt: formatarWKT(via.geometry)
-                        };
+                    try {
+                        const res = await fetch("https://overpass-api.de/api/interpreter", {
+                            method: "POST",
+                            body: query
+                        });
+                        const osm = await res.json();
 
-                        // REQUISITO: Nome do arquivo = SC_ID_LOGRADOURO
-                        salvarJSON(conteudoExportacao, face.sc_id_logradouro);
+                        if (osm.elements && osm.elements.length > 0) {
+                            osm.elements.forEach((via) => {
+                                const exportData = {
+                                    CI_ID_QUADRA: quadra.CI_ID_QUADRA,
+                                    SC_ID_LOGRADOURO: face.SC_ID_LOGRADOURO,
+                                    NOM_ORIGINAL: nomeOriginal,
+                                    NOM_OSM: via.tags.name,
+                                    OSM_ID: via.id,
+                                    WKT: formatarWKT(via.geometry),
+                                    CENTROIDE_FACE: { lat, lng }
+                                };
 
-                        htmlLog += `
-                            <div class="face-card found">
-                                <span class="label">ID: ${face.sc_id_logradouro}</span>
-                                <b>${face.nome_logradouro}</b><br>
-                                <small style="color:green">Arquivo exportado com sucesso.</small>
-                            </div>`;
+                                const nomeArq = `${nomeBusca}_${face.SC_ID_LOGRADOURO}_${via.id}`;
+                                salvarJSON(exportData, nomeArq);
 
-                        L.polyline(via.geometry.map(p => [p.lat, p.lon]), {color: '#3498db'}).addTo(map);
-                    } else {
-                        htmlLog += `
-                            <div class="face-card not-found">
-                                <span class="label">ID: ${face.sc_id_logradouro}</span>
-                                <b>${face.nome_logradouro}</b><br>
-                                <small style="color:red">Via não encontrada no OSM.</small>
-                            </div>`;
-                    }
-                } catch (e) {
-                    console.error("Erro na face " + face.sc_id_logradouro, e);
+                                L.polyline(via.geometry.map(p => [p.lat, p.lon]), { color: '#27ae60', weight: 5 }).addTo(map)
+                                 .bindPopup(`Busca: ${nomeBusca}<br>OSM: ${via.tags.name}`);
+                            });
+
+                            container.innerHTML += `
+                                <div class="FACE-card found">
+                                    <span class="label-id">${quadra.CI_ID_QUADRA}</span>
+                                    <b>${nomeOriginal}</b><br>
+                                    <small>Encontradas ${osm.elements.length} geometrias (incluindo pistas duplas).</small>
+                                </div>`;
+                        } else {
+                            container.innerHTML += `
+                                <div class="FACE-card not-found">
+                                    <b>${nomeOriginal}</b><br>
+                                    <small>Sem resultados para "${nomeBusca}" em 400m.</small>
+                                </div>`;
+                        }
+                    } catch (err) { console.error(err); }
+                    await new Promise(r => setTimeout(r, 1300));
                 }
-                // Delay para evitar bloqueio e permitir downloads múltiplos
-                await new Promise(r => setTimeout(r, 1000));
             }
-            container.innerHTML = htmlLog;
         }
     </script>
 </body>
