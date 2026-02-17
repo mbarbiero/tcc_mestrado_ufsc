@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Visualizador WKT - SuperCIATA</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; background: #f0f0f0; font-family: 'Segoe UI', sans-serif; }
+        
+        /* Container fixo 800x600 no canto superior esquerdo */
+        #frame-container { 
+            width: 800px; 
+            height: 600px; 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            background: white; 
+            border-right: 1px solid #ccc;
+            border-bottom: 1px solid #ccc;
+            overflow: hidden; 
+        }
+
+        #map { width: 100%; height: 100%; z-index: 1; }
+        
+        .info-panel { 
+            position: absolute; 
+            top: 20px; 
+            left: 20px; 
+            z-index: 1001; 
+            background: rgba(255, 255, 255, 0.96); 
+            padding: 15px; 
+            border-radius: 2px; 
+            width: 280px; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border: 1px solid #999;
+        }
+
+        h2 { margin: 0 0 10px 0; font-size: 15px; color: #333; border-bottom: 2px solid #2e7d32; padding-bottom: 5px; }
+        
+        textarea {
+            width: 100%;
+            height: 80px;
+            font-family: 'Consolas', monospace;
+            font-size: 10px;
+            margin-bottom: 10px;
+            padding: 5px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+            resize: none;
+        }
+
+        .btn-view {
+            width: 100%;
+            padding: 10px;
+            background: #2e7d32;
+            color: white;
+            border: none;
+            border-radius: 2px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 11px;
+            transition: background 0.2s;
+        }
+
+        .btn-view:hover { background: #1b5e20; }
+
+        .result-group { margin-top: 15px; display: none; }
+        .label-title { font-size: 9px; color: #666; font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 3px; }
+        .coord-item { font-family: 'Consolas', monospace; font-size: 10px; padding: 5px; background: #fff; border: 1px solid #ddd; border-left: 4px solid #2e7d32; }
+    </style>
+</head>
+<body>
+
+    <div id="frame-container">
+        <div class="info-panel">
+            <h2>SuperCIATA - Visualizador</h2>
+            
+            <span class="label-title">Insira o WKT (POLYGON)</span>
+            <textarea id="wktInput" placeholder="POLYGON((-53.8024 -25.6810, ...))"></textarea>
+            
+            <button class="btn-view" onclick="processWKT()">Visualizar no Mapa</button>
+
+            <div id="resultArea" class="result-group">
+                <span class="label-title">Centroide Geométrico</span>
+                <div id="centroidCoords" class="coord-item"></div>
+            </div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map', { zoomControl: false, attributionControl: false });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 22 }).addTo(map);
+        
+        // Posição inicial neutra
+        map.setView([-25.6807, -53.8017], 16);
+
+        let currentLayer = null;
+        let currentMarker = null;
+
+        // Função técnica para calcular centroide de massa (Shoelace Formula)
+        function getTrueCentroid(latLngs) {
+            let pts = [...latLngs];
+            // Garante que o polígono está fechado para o cálculo
+            if (pts[0][0] !== pts[pts.length-1][0] || pts[0][1] !== pts[pts.length-1][1]) {
+                pts.push(pts[0]);
+            }
+            
+            let area = 0, cx = 0, cy = 0;
+            for (let i = 0; i < pts.length - 1; i++) {
+                let p1 = pts[i], p2 = pts[i+1];
+                let f = (p1[1] * p2[0]) - (p2[1] * p1[0]);
+                area += f;
+                cx += (p1[1] + p2[1]) * f;
+                cy += (p1[0] + p2[0]) * f;
+            }
+            area *= 0.5;
+            if (area === 0) return L.latLng(latLngs[0][0], latLngs[0][1]);
+            return L.latLng(cy / (6 * area), cx / (6 * area));
+        }
+
+        function processWKT() {
+            const wkt = document.getElementById('wktInput').value.trim();
+            if (!wkt) return alert("Por favor, insira um WKT válido.");
+
+            try {
+                // Parse simplificado para POLYGON((...))
+                const match = wkt.match(/\(\((.*)\)\)/);
+                if (!match) throw new Error("Formato inválido");
+                
+                const pairs = match[1].split(',');
+                const latLngs = pairs.map(pair => {
+                    const parts = pair.trim().split(' ');
+                    // WKT: Longitude Latitude -> Leaflet: Latitude Longitude
+                    return [parseFloat(parts[1]), parseFloat(parts[0])];
+                });
+
+                // Limpar camadas anteriores
+                if (currentLayer) map.removeLayer(currentLayer);
+                if (currentMarker) map.removeLayer(currentMarker);
+
+                // Desenhar Polígono
+                currentLayer = L.polygon(latLngs, {
+                    color: '#2e7d32',
+                    weight: 3,
+                    fillColor: '#2e7d32',
+                    fillOpacity: 0.2
+                }).addTo(map);
+
+                // Calcular Centroide Real
+                const center = getTrueCentroid(latLngs);
+
+                // Adicionar Marcador
+                currentMarker = L.circleMarker(center, {
+                    radius: 7,
+                    color: "#fff",
+                    weight: 2,
+                    fillColor: "#2e7d32",
+                    fillOpacity: 1
+                }).addTo(map);
+
+                // Atualizar UI
+                document.getElementById('centroidCoords').innerText = `${center.lat.toFixed(8)}, ${center.lng.toFixed(8)}`;
+                document.getElementById('resultArea').style.display = 'block';
+
+                // AJUSTE DE VISUALIZAÇÃO:
+                // 1. Enquadra na geometria
+                map.fitBounds(currentLayer.getBounds(), { padding: [60, 60] });
+
+                // 2. Move para a direita (panBy) para tirar o polígono de baixo do painel
+                setTimeout(() => {
+                    map.panBy([-150, 0]); // Move o mapa 150px para a esquerda (objeto vai para a direita)
+                }, 300);
+
+            } catch (e) {
+                alert("Erro ao processar WKT. Use o formato: POLYGON((lng lat, lng lat...))");
+            }
+        }
+    </script>
+</body>
+</html>

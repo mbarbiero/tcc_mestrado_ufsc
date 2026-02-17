@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA v15.3 - Precisão Real</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        #frame-container {
+            width: 1000px;
+            height: 600px;
+            position: relative;
+            background: #fff;
+            border: 1px solid #333;
+            overflow: hidden;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        .control-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 1001;
+            background: rgba(255, 255, 255, 0.98);
+            padding: 15px;
+            border-radius: 4px;
+            width: 320px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+            border-top: 6px solid #2e7d32;
+        }
+
+        textarea {
+            width: 100%;
+            height: 120px;
+            font-family: monospace;
+            font-size: 10px;
+            margin-top: 5px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+
+        .btn-main {
+            width: 100%;
+            padding: 12px;
+            background: #2e7d32;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+            border-radius: 4px;
+            width: 100%;
+        }
+
+        .btn-copy {
+            width: 100%;
+            padding: 10px;
+            background: #1565c0;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+
+        #info-log {
+            font-size: 11px;
+            margin-top: 10px;
+            color: #333;
+            line-height: 1.4;
+            border-top: 1px dashed #ccc;
+            padding-top: 8px;
+        }
+
+        .wkt-box {
+            font-size: 10px;
+            background: #f0f0f0;
+            padding: 8px;
+            margin-top: 5px;
+            border: 1px solid #bbb;
+            word-break: break-all;
+            display: none;
+            color: #d32f2f;
+            font-family: monospace;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+
+        .action-link {
+            display: none;
+            margin-top: 15px;
+            color: #2e7d32;
+            text-decoration: underline;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .face-label {
+            background: white;
+            border: 1px solid #2e7d32;
+            color: #1b5e20;
+            padding: 2px 5px;
+            font-size: 11px;
+            font-weight: bold;
+            border-radius: 3px;
+            white-space: nowrap;
+            box-shadow: 1px 1px 4px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+
+        .street-name {
+            font-size: 8px;
+            display: block;
+            color: #666;
+            font-weight: normal;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="frame-container">
+        <div class="control-panel">
+            <h2 style="margin:0; color:#2e7d32; font-size:20px;">SuperCIATA</h2>
+            <div style="font-size: 11px; color: #666; margin-bottom: 10px;">Versão 15.3 - BD Completo e Correção Métrica
+            </div>
+            <div id="input-section">
+                <textarea id="jsonInput" placeholder="Cole o JSON da quadra aqui..."></textarea>
+                <button class="btn-main" onclick="gerarGeometria()">GERAR WKT CORRIGIDO</button>
+            </div>
+            <div id="info-log">Aguardando...</div>
+            <div id="wkt-display" class="wkt-box"></div>
+            <button id="btn-copy-wkt" class="btn-copy" onclick="copiarWKT()">COPIAR WKT E LIMPAR</button>
+            <div id="reset-link" class="action-link" onclick="location.reload()">+ Nova Análise</div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map', { zoomControl: false, attributionControl: false });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 22 }).addTo(map);
+        const layers = L.featureGroup().addTo(map);
+
+        const DB_OSM = {
+            "5C81EDF2": [[-53.8037077, -25.6594097], [-53.8050355, -25.659103], [-53.8061923, -25.6588025], [-53.8076601, -25.6584386], [-53.8103197, -25.6577791], [-53.8116652, -25.6574455], [-53.8147295, -25.6566684]],
+            "37EBE4BB": [[-53.810379, -25.6532896], [-53.8108146, -25.6547103], [-53.8112258, -25.6560524], [-53.8116652, -25.6574455], [-53.8124978, -25.6602386], [-53.813598, -25.6640823]],
+            "EF2B51D7": [[-53.8155309, -25.6549893], [-53.8125676, -25.6557194], [-53.8112258, -25.6560524], [-53.8098874, -25.6563791], [-53.8072359, -25.6570515], [-53.803297, -25.6580232]],
+            "0E9A43FC": [[-53.8127413, -25.6656207], [-53.8116034, -25.6619364], [-53.8103197, -25.6577791], [-53.8098874, -25.6563791], [-53.8090416, -25.6536401]],
+            "9003F37C": [[-53.8108103, -25.6778927], [-53.81012, -25.6780615], [-53.8094536, -25.6782244], [-53.8081104, -25.678564], [-53.806674, -25.678927], [-53.8058725, -25.6791297], [-53.8053082, -25.6792759], [-53.8022714, -25.6800403], [-53.801106, -25.6803347], [-53.7955719, -25.6817334]],
+            "1558A9D1": [[-53.8034091, -25.6839624], [-53.8030338, -25.6826482], [-53.8025915, -25.6811351], [-53.8022714, -25.6800403], [-53.8020149, -25.6791627]],
+            "F0D334EC": [[-53.8024655, -25.6847714], [-53.8014431, -25.6814349], [-53.801106, -25.6803347], [-53.8002786, -25.677624]],
+            "736565AB": [[-53.8054966, -25.67985], [-53.8053082, -25.6792759], [-53.8045026, -25.6765563], [-53.803409, -25.6729671], [-53.8012737, -25.666103]],
+            "6B8E7F2D": [[-53.7912127, -25.6797837], [-53.7970036, -25.678407], [-53.8002786, -25.677624], [-53.8045026, -25.6765563], [-53.807284, -25.6758486]],
+            "9E705E10": [[-53.8134764, -25.6756072], [-53.8111988, -25.6761988], [-53.8076515, -25.6770561], [-53.8048796, -25.6778825], [-53.8035364, -25.6781216]],
+            "E544EA7B": [[-53.8062077, -25.6773609], [-53.8058668, -25.6762023], [-53.8055127, -25.6750052], [-53.8051318, -25.6737677], [-53.8048258, -25.6727655], [-53.804779, -25.6726212], [-53.8044171, -25.6715055], [-53.8043842, -25.6713902], [-53.8040936, -25.6703757], [-53.8036948, -25.6691607], [-53.8033125, -25.6679471], [-53.8021881, -25.6669041], [-53.8012737, -25.666103], [-53.8011003, -25.6658998], [-53.7999304, -25.6649096]],
+            "F54DE0AF": [[-53.8055092, -25.6803838], [-53.8025915, -25.6811351], [-53.7959259, -25.6828776]]
+        };
+
+        function getLocalPoints(id, centroideFace) {
+            const pts = DB_OSM[id]; if (!pts) return null;
+            let dists = pts.map(p => ({ coord: p, d: Math.pow(p[1] - centroideFace.lat, 2) + Math.pow(p[0] - centroideFace.lng, 2) })).sort((a, b) => a.d - b.d);
+            const idx1 = pts.indexOf(dists[0].coord), idx2 = pts.indexOf(dists[1].coord);
+            return idx1 < idx2 ? [pts[idx1], pts[idx2]] : [pts[idx2], pts[idx1]];
+        }
+
+        function rotatePoint(point, center, angle) {
+            const [lat, lng] = point, [cLat, cLng] = center;
+            const cos = Math.cos(angle), sin = Math.sin(angle);
+            const cosLat = Math.cos(cLat * Math.PI / 180);
+            const dx = (lng - cLng) * cosLat, dy = (lat - cLat);
+            return [(dx * sin + dy * cos) + cLat, ((dx * cos - dy * sin) / cosLat) + cLng];
+        }
+
+        function gerarGeometria() {
+            try {
+                const data = JSON.parse(document.getElementById('jsonInput').value);
+                layers.clearLayers();
+
+                let allRefPoints = [];
+                data.faces.forEach(f => {
+                    const rs = getLocalPoints(f.sc_id_logradouro, f.centroide);
+                    if (rs) rs.forEach(p => allRefPoints.push({ lat: p[1], lng: p[0] }));
+                });
+                const cRefLat = allRefPoints.reduce((s, p) => s + p.lat, 0) / allRefPoints.length;
+                const cRefLng = allRefPoints.reduce((s, p) => s + p.lng, 0) / allRefPoints.length;
+
+                const f1 = data.faces[0];
+                const rs1 = getLocalPoints(f1.sc_id_logradouro, f1.centroide);
+                const azimute = Math.atan2(rs1[1][1] - rs1[0][1], (rs1[1][0] - rs1[0][0]) * Math.cos(f1.centroide.lat * Math.PI / 180));
+
+                // CORREÇÃO MÉTRICA: Fator de escala real baseado na latitude
+                const R_TERRA = 6378137;
+                const degToRad = Math.PI / 180;
+                const mLat = (1 / (degToRad * R_TERRA));
+                const mLng = (1 / (degToRad * R_TERRA * Math.cos(f1.centroide.lat * degToRad)));
+
+                const w = f1.dim_face * mLng;
+                const fSide = data.faces.find(f => f.ordem_face === 2) || data.faces[1];
+                const h = fSide.dim_face * mLat;
+
+                const anchor = [f1.centroide.lat, f1.centroide.lng];
+                const vBase = [[0, -w / 2], [0, w / 2], [-h, w / 2], [-h, -w / 2]].map(p => rotatePoint([anchor[0] + p[0], anchor[1] + p[1]], anchor, azimute));
+
+                const cPolLat = vBase.reduce((s, p) => s + p[0], 0) / 4;
+                const cPolLng = vBase.reduce((s, p) => s + p[1], 0) / 4;
+                const dLat = cRefLat - cPolLat, dLng = cRefLng - cPolLng;
+                const vFinal = vBase.map(p => [p[0] + dLat, p[1] + dLng]);
+
+                const wkt = `POLYGON((${vFinal.map(p => `${p[1].toFixed(8)} ${p[0].toFixed(8)}`).join(', ')}, ${vFinal[0][1].toFixed(8)} ${vFinal[0][0].toFixed(8)}))`;
+
+                L.polygon(vFinal, { color: '#2e7d32', weight: 3, fillOpacity: 0.3 }).addTo(layers);
+                for (let i = 0; i < 4; i++) {
+                    const face = data.faces[i];
+                    const mid = [(vFinal[i][0] + vFinal[(i + 1) % 4][0]) / 2, (vFinal[i][1] + vFinal[(i + 1) % 4][1]) / 2];
+                    L.marker(mid, { icon: L.divIcon({ className: 'face-label-icon', html: `<div class="face-label"><span class="street-name">${face.nome_logradouro}</span>${face.dim_face.toFixed(2)}m</div>`, iconSize: [0, 0] }) }).addTo(layers);
+                }
+
+                document.getElementById('info-log').innerHTML = `<b>Quadra:</b> ${data.sc_id_quadra}<br><b>WKT Projetado com Precisão Métrica</b>`;
+                document.getElementById('wkt-display').innerText = wkt;
+                document.getElementById('wkt-display').style.display = 'block';
+                document.getElementById('btn-copy-wkt').style.display = 'block';
+                map.fitBounds(layers.getBounds(), { padding: [100, 100] });
+
+            } catch (e) { alert("Erro: " + e.message); }
+        }
+
+        function copiarWKT() {
+            const wkt = document.getElementById('wkt-display').innerText;
+            navigator.clipboard.writeText(wkt).then(() => {
+                document.getElementById('input-section').style.display = 'none';
+                document.getElementById('btn-copy-wkt').style.display = 'none';
+                document.getElementById('wkt-display').innerText = "WKT ATUALIZADO COPIADO!";
+                document.getElementById('wkt-display').style.background = "#e8f5e9";
+                document.getElementById('reset-link').style.display = 'block';
+            });
+        }
+    </script>
+</body>
+
+</html>

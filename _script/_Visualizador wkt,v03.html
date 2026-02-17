@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Visualizador - Dois WKTs</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; background: #1a1a1a; font-family: 'Segoe UI', sans-serif; }
+        #frame-container { 
+            width: 800px; height: 600px; 
+            position: absolute; top: 0; left: 0; 
+            background: #fff; border: 2px solid #333; overflow: hidden; 
+        }
+        #map { width: 100%; height: 100%; z-index: 1; }
+        .control-panel { 
+            position: absolute; top: 15px; left: 15px; z-index: 1001; 
+            background: rgba(255, 255, 255, 0.98); padding: 12px; border-radius: 4px; 
+            width: 280px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border: 1px solid #666; 
+            max-height: 570px; overflow-y: auto;
+        }
+        .header-title { border-bottom: 2px solid #2e7d32; margin-bottom: 10px; padding-bottom: 5px; }
+        .header-title h1 { margin: 0; font-size: 16px; color: #1a1a1a; }
+        .header-title span { font-size: 11px; color: #666; font-weight: bold; }
+        .input-group { margin-bottom: 8px; padding: 6px; border: 1px solid #ddd; border-radius: 3px; background: #f9f9f9; }
+        label { font-size: 9px; font-weight: bold; text-transform: uppercase; color: #444; display: block; margin-bottom: 2px; }
+        textarea { width: 100%; height: 40px; font-family: 'Consolas', monospace; font-size: 9px; resize: none; box-sizing: border-box; }
+        .input-text { width: 100%; font-size: 10px; padding: 3px; border: 1px solid #ccc; box-sizing: border-box; }
+        .flex-row { display: flex; gap: 5px; margin-top: 2px; }
+        .btn-calc { width: 100%; padding: 10px; background: #2e7d32; color: white; border: none; cursor: pointer; font-weight: bold; text-transform: uppercase; border-radius: 2px; margin-top: 5px; }
+        .error-panel { margin-top: 10px; display: none; flex-direction: column; gap: 4px; }
+        .info-item { background: #f4f4f4; border: 1px solid #ddd; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center; border-radius: 2px; font-weight: bold; font-size: 11px; }
+        .error-item { background: #000; color: #fff; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; border-radius: 2px; font-weight: bold; font-size: 12px; }
+        .error-label { font-size: 9px; text-transform: uppercase; opacity: 0.8; font-weight: normal; }
+        .btn-export { width: 100%; padding: 8px; background: #1565c0; color: white; border: none; cursor: pointer; font-size: 10px; font-weight: bold; margin-top: 5px; border-radius: 2px; }
+        .btn-reset { background:none; border:none; color:#2e7d32; cursor:pointer; text-decoration:underline; font-size:10px; margin-top:8px; width: 100%; text-align: center; }
+        .legend-display { font-size: 10px; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 5px; font-weight: bold; }
+        .bullet { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+    </style>
+</head>
+<body>
+
+    <div id="frame-container">
+        <div class="control-panel">
+            <div class="header-title">
+                <h1>SuperCIATA</h1>
+                <span>Acurácia GEO x SuperCIATA</span>
+            </div>
+            
+            <div id="ui-inputs">
+                <div class="input-group">
+                    <label>QUADRA</label>
+                    <input type="text" id="idQuadra" class="input-text" placeholder="Ex: Q-88">
+                </div>
+                
+                <div class="input-group">
+                    <label>Configuração WKT A (Referência)</label>
+                    <textarea id="wktA" placeholder="WKT da Prefeitura..."></textarea>
+                    <div class="flex-row">
+                        <input type="text" id="legA" class="input-text" value="Prefeitura">
+                        <input type="color" id="corA" value="#C71585" style="width:35px; height:20px; border:none; cursor:pointer;">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>Configuração WKT B (Alvo)</label>
+                    <textarea id="wktB" placeholder="WKT do SuperCIATA..."></textarea>
+                    <div class="flex-row">
+                        <input type="text" id="legB" class="input-text" value="SuperCIATA">
+                        <input type="color" id="corB" value="#2e7d32" style="width:35px; height:20px; border:none; cursor:pointer;">
+                    </div>
+                </div>
+
+                <button class="btn-calc" onclick="processar()">Analisar Acurácia</button>
+            </div>
+
+            <div id="errorArea" class="error-panel">
+                <div id="res-legend" class="legend-display"></div>
+                <div class="info-item"><span class="error-label">QUADRA</span><span id="res-id"></span></div>
+                <div class="error-item"><span class="error-label">RMSE Total</span><span id="err-rmse" style="color:#ffeb3b"></span></div>
+                <div class="error-item"><span class="error-label">Erro Centroide</span><span id="err-centroide"></span></div>
+                
+                <button id="btnExport" class="btn-export" onclick="exportarMemoria()">Salvar Relatório (.txt)</button>
+                <button class="btn-reset" onclick="resetUI()">+ Ajustar Dados</button>
+            </div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map', { zoomControl: false, attributionControl: false });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 22 }).addTo(map);
+        let layers = L.featureGroup().addTo(map);
+        let memoriaCalculo = "";
+
+        function parseWKT(wkt) {
+            try {
+                const match = wkt.match(/\(\((.*)\)\)/);
+                if (!match) return null;
+                let pts = match[1].split(',').map(p => {
+                    const c = p.trim().split(/\s+/);
+                    return { lat: parseFloat(c[1]), lng: parseFloat(c[0]) };
+                });
+                if (pts.length > 1 && pts[0].lat === pts[pts.length-1].lat && pts[0].lng === pts[pts.length-1].lng) pts.pop();
+                return pts;
+            } catch(e) { return null; }
+        }
+
+        function calcularCentroidePoligonal(pts) {
+            let area = 0, cx = 0, cy = 0;
+            for (let i = 0; i < pts.length; i++) {
+                let p1 = pts[i], p2 = pts[(i + 1) % pts.length];
+                let f = (p1.lng * p2.lat) - (p2.lng * p1.lat);
+                area += f; cx += (p1.lng + p2.lng) * f; cy += (p1.lat + p2.lat) * f;
+            }
+            area *= 0.5;
+            return { lat: cy / (6 * area), lng: cx / (6 * area) };
+        }
+
+        function processar() {
+            const quadra = document.getElementById('idQuadra').value || "S_QUADRA";
+            const ptsA = parseWKT(document.getElementById('wktA').value);
+            const ptsB = parseWKT(document.getElementById('wktB').value);
+            if (!ptsA || !ptsB) return alert("Erro no WKT.");
+
+            layers.clearLayers();
+            const corA = document.getElementById('corA').value;
+            const corB = document.getElementById('corB').value;
+            const legA = document.getElementById('legA').value;
+            const legB = document.getElementById('legB').value;
+
+            memoriaCalculo = `RELATÓRIO DE ACURÁCIA GEOGRÁFICA\nQUADRA: ${quadra}\nRef: ${legA} | Alvo: ${legB}\nData: ${new Date().toLocaleString()}\n`;
+            memoriaCalculo += `------------------------------------------------------------\n\n`;
+            
+            const cA = calcularCentroidePoligonal(ptsA);
+            const cB = calcularCentroidePoligonal(ptsB);
+            const distCentroide = L.latLng(cA).distanceTo(L.latLng(cB));
+
+            let somaQuadrados = 0;
+            memoriaCalculo += `ANÁLISE VÉRTICE A VÉRTICE (Pareamento):\n`;
+            memoriaCalculo += `Vért. | Latitude (B) | Longitude (B) | dLat(cm) | dLng(cm) | Erro(cm)\n`;
+
+            ptsB.forEach((pB, i) => {
+                let minD = Infinity, bestPA = null;
+                ptsA.forEach(pA => {
+                    let d = L.latLng(pB).distanceTo(L.latLng(pA));
+                    if (d < minD) { minD = d; bestPA = pA; }
+                });
+
+                let dLatCm = (pB.lat - bestPA.lat) * 11113200; 
+                let dLngCm = (pB.lng - bestPA.lng) * (11113200 * Math.cos(pB.lat * Math.PI/180));
+                let erroCm = minD * 100;
+
+                somaQuadrados += Math.pow(minD, 2);
+                memoriaCalculo += `${(i+1).toString().padEnd(5)} | ${pB.lat.toFixed(7)} | ${pB.lng.toFixed(7)} | ${dLatCm.toFixed(2).padStart(8)} | ${dLngCm.toFixed(2).padStart(8)} | ${erroCm.toFixed(2).padStart(8)}\n`;
+            });
+
+            const rmse = Math.sqrt(somaQuadrados / ptsB.length);
+
+            L.polygon(ptsA, { color: corA, weight: 2, fillOpacity: 0.05, dashArray: '5,5' }).addTo(layers);
+            L.polygon(ptsB, { color: corB, weight: 3, fillOpacity: 0.1 }).addTo(layers);
+
+            document.getElementById('res-id').innerText = quadra;
+            document.getElementById('err-rmse').innerText = (rmse * 100).toFixed(2) + " cm";
+            document.getElementById('err-centroide').innerText = (distCentroide * 100).toFixed(2) + " cm";
+            document.getElementById('res-legend').innerHTML = `
+                <div style="margin-bottom:3px;"><span class="bullet" style="background:${corA}"></span>${legA}</div>
+                <div><span class="bullet" style="background:${corB}"></span>${legB}</div>`;
+            
+            document.getElementById('ui-inputs').style.display = 'none';
+            document.getElementById('errorArea').style.display = 'flex';
+            document.getElementById('btnExport').style.display = 'block';
+
+            map.fitBounds(layers.getBounds(), { padding: [50, 50] });
+            setTimeout(() => { map.panBy([-130, 0]); }, 300);
+
+            memoriaCalculo += `\n------------------------------------------------------------\n`;
+            memoriaCalculo += `RMSE (Erro Médio Quadrático): ${(rmse * 100).toFixed(2)} cm\n`;
+            memoriaCalculo += `DESVIO DE CENTROIDE: ${(distCentroide * 100).toFixed(2)} cm\n`;
+        }
+
+        function exportarMemoria() {
+            const quadra = document.getElementById('idQuadra').value || "Analise_WKT";
+            const blob = new Blob([memoriaCalculo], { type: 'text/plain' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${quadra}.txt`;
+            link.click();
+            document.getElementById('btnExport').style.display = 'none';
+        }
+
+        function resetUI() {
+            document.getElementById('ui-inputs').style.display = 'block';
+            document.getElementById('errorArea').style.display = 'none';
+        }
+    </script>
+</body>
+</html>

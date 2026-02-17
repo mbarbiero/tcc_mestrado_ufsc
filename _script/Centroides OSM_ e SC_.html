@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Centroides OSM_ e SC_</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; background: #f0f0f0; font-family: 'Segoe UI', sans-serif; }
+        #frame-container { width: 800px; height: 600px; position: absolute; top: 0; left: 0; background: white; border-right: 1px solid #ccc; border-bottom: 1px solid #ccc; overflow: hidden; }
+        #map { width: 100%; height: 100%; z-index: 1; }
+        
+        .info-panel { 
+            position: absolute; top: 20px; left: 20px; z-index: 1001; 
+            background: rgba(255, 255, 255, 0.94); padding: 15px; border-radius: 2px; 
+            width: 230px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1px solid #999;
+        }
+
+        h2 { margin: 0 0 10px 0; font-size: 16px; color: #333; }
+        .label-group { margin-bottom: 10px; }
+        .label-title { font-size: 10px; color: #666; font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 3px; }
+        .coord-item { font-family: 'Consolas', monospace; font-size: 10px; padding: 5px; background: #fff; border: 1px solid #ddd; color: #333; }
+        .sc-border { border-left: 4px solid #2e7d32; }
+        .osm-border { border-left: 4px solid #d32f2f; }
+
+        .delta-container { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+        /* Estilo unificado: fundo preto, texto branco e negrito */
+        .delta-item { 
+            background: #000; color: #fff; padding: 8px; 
+            display: flex; justify-content: space-between; align-items: center;
+            border-radius: 2px; font-weight: bold; font-size: 12px;
+        }
+        .delta-label { font-size: 9px; text-transform: uppercase; color: #fff; opacity: 0.8; font-weight: normal; }
+    </style>
+</head>
+<body>
+    <div id="frame-container">
+        <div class="info-panel">
+            <h2>Centroides OSM_ e SC_</h2>
+            
+            <div class="label-group">
+                <span class="label-title">Centroide SuperCIATA</span>
+                <div id="final-sc" class="coord-item sc-border"></div>
+            </div>
+            
+            <div class="label-group">
+                <span class="label-title">Centroide OSM</span>
+                <div id="final-osm" class="coord-item osm-border"></div>
+            </div>
+
+            <span class="label-title">Desvios em Centímetros</span>
+            <div class="delta-container">
+                <div class="delta-item">
+                    <span class="delta-label">Δ Latitude</span>
+                    <span id="d-lat">0.00 cm</span>
+                </div>
+                <div class="delta-item">
+                    <span class="delta-label">Δ Longitude</span>
+                    <span id="d-lng">0.00 cm</span>
+                </div>
+                <div class="delta-item" style="border-top: 1px solid #555;">
+                    <span class="delta-label">Δ Total</span>
+                    <span id="distancia-cm">0.00 cm</span>
+                </div>
+            </div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const ciataData = {
+            "faces": [
+                { "id": "9003F37C", "lat": -25.68023275, "lng": -53.80173725 },
+                { "id": "F0D334EC", "lat": -25.680921, "lng": -53.80135666 },
+                { "id": "F54DE0AF", "lat": -25.681220375, "lng": -53.80201275 },
+                { "id": "1558A9D1", "lat": -25.6805995, "lng": -53.8023365 }
+            ]
+        };
+
+        const osmGeoms = [
+            { id: "9003F37C", wkt: "-53.8108103 -25.6778927,-53.8023996 -25.6800076,-53.8022714 -25.6800403,-53.801106 -25.6803347,-53.7955719 -25.6817334" },
+            { id: "1558A9D1", wkt: "-53.8034091 -25.6839624,-53.8025915 -25.6811351,-53.8022714 -25.6800403,-53.8020149 -25.6791627" },
+            { id: "F0D334EC", wkt: "-53.8024655 -25.6847714,-53.8014431 -25.6814349,-53.801106 -25.6803347,-53.8002786 -25.677624" },
+            { id: "F54DE0AF", wkt: "-53.8055092 -25.6803838,-53.8025915 -25.6811351,-53.8014431 -25.6814349,-53.7959259 -25.6828776" }
+        ];
+
+        const map = L.map('map', { zoomControl: false, attributionControl: false, maxZoom: 20 });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20 }).addTo(map);
+
+        let sumSC = {lat: 0, lng: 0}, sumOSM = {lat: 0, lng: 0}, osmQuadraPoints = [];
+        const colorSC = "#2e7d32", colorOSM = "#d32f2f";
+
+        ciataData.faces.forEach(face => {
+            sumSC.lat += face.lat; sumSC.lng += face.lng;
+            L.circleMarker([face.lat, face.lng], { radius: 4.5, color: "#fff", weight: 1.5, fillColor: colorSC, fillOpacity: 1 }).addTo(map);
+            const geom = osmGeoms.find(g => g.id === face.id);
+            const pts = geom.wkt.split(',').map(s => {
+                const c = s.trim().split(' ');
+                return [parseFloat(c[1]), parseFloat(c[0])];
+            });
+            let sorted = [...pts].sort((a,b) => Math.sqrt(Math.pow(face.lat-a[0],2) + Math.pow(face.lng-a[1],2)) - Math.sqrt(Math.pow(face.lat-b[0],2) + Math.pow(face.lng-b[1],2)));
+            osmQuadraPoints.push(sorted[0], sorted[1]);
+            sumOSM.lat += (sorted[0][0] + sorted[1][0])/2;
+            sumOSM.lng += (sorted[0][1] + sorted[1][1])/2;
+            L.circleMarker(sorted[0], { radius: 2, color: colorOSM, fillOpacity: 0.9 }).addTo(map);
+            L.circleMarker(sorted[1], { radius: 2, color: colorOSM, fillOpacity: 0.9 }).addTo(map);
+        });
+
+        const finalSC = L.latLng(sumSC.lat/4, sumSC.lng/4);
+        const finalOSM = L.latLng(sumOSM.lat/4, sumOSM.lng/4);
+
+        const center = [finalOSM.lat, finalOSM.lng];
+        osmQuadraPoints.sort((a, b) => Math.atan2(a[0] - center[0], a[1] - center[1]) - Math.atan2(b[0] - center[0], b[1] - center[1]));
+        L.polygon(osmQuadraPoints, { color: colorOSM, weight: 1.5, fillColor: colorOSM, fillOpacity: 0.1 }).addTo(map);
+
+        L.circleMarker(finalSC, { radius: 9, color: "#fff", weight: 2, fillColor: colorSC, fillOpacity: 1 }).addTo(map);
+        L.circleMarker(finalOSM, { radius: 6, color: colorOSM, weight: 2, fillColor: '#fff', fillOpacity: 1 }).addTo(map);
+
+        const cmLat = Math.abs((finalSC.lat - finalOSM.lat) * 111320 * 100).toFixed(2);
+        const cmLng = Math.abs((finalSC.lng - finalOSM.lng) * 100450 * 100).toFixed(2);
+        const distTotal = (finalSC.distanceTo(finalOSM) * 100).toFixed(2);
+
+        document.getElementById('final-sc').innerText = `${finalSC.lat.toFixed(8)}, ${finalSC.lng.toFixed(8)}`;
+        document.getElementById('final-osm').innerText = `${finalOSM.lat.toFixed(8)}, ${finalOSM.lng.toFixed(8)}`;
+        document.getElementById('d-lat').innerText = `${cmLat} cm`;
+        document.getElementById('d-lng').innerText = `${cmLng} cm`;
+        document.getElementById('distancia-cm').innerText = `${distTotal} cm`;
+
+        map.setView(finalSC, 18);
+        map.panBy([-150, -80]); 
+        window.onload = () => { setTimeout(() => { map.invalidateSize(); }, 200); };
+    </script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Dimensões de Faces</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; background: #1a1a1a; }
+        #frame-container { 
+            width: 800px; height: 600px; 
+            position: absolute; top: 0; left: 0; 
+            background: #fff; overflow: hidden; border: 1px solid #333;
+        }
+        #map { width: 100%; height: 100%; z-index: 1; }
+        
+        /* Painel de Título Estilizado */
+        .title-overlay {
+            position: absolute; top: 15px; left: 15px; z-index: 1001;
+            background: rgba(255, 255, 255, 0.9); padding: 10px 15px;
+            border-left: 5px solid #2e7d32; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        .title-overlay h1 { margin: 0; font-size: 16px; color: #333; text-transform: uppercase; }
+        .title-overlay span { font-size: 10px; color: #666; }
+
+        /* Estilo das Etiquetas de Dimensão */
+        .face-label {
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid #fff;
+            color: #fff;
+            padding: 1px 4px;
+            font-size: 10px;
+            font-weight: bold;
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+
+<div id="frame-container">
+    <div class="title-overlay">
+        <h1>SuperCIATA</h1>
+        <span>Mapeamento de Dimensões por Face</span>
+    </div>
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map', { zoomControl: false, attributionControl: false });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 22 }).addTo(map);
+
+    // Dados extraídos do seu arquivo CSV/JSON
+    const quadrasData = [
+        {
+            "id": "0E9A43FC...",
+            "faces": [
+                {"ordem": 1, "dim": 127.38, "lat": -25.6575205, "lng": -53.81097925},
+                {"ordem": 2, "dim": 122.76, "lat": -25.65716906, "lng": -53.81145440},
+                {"ordem": 3, "dim": 114.9, "lat": -25.65631829, "lng": -53.81064608},
+                {"ordem": 4, "dim": 132.78, "lat": -25.65714430, "lng": -53.81025486}
+            ]
+        },
+        {
+            "id": "1558A9D1...",
+            "faces": [
+                {"ordem": 1, "dim": 89.82, "lat": -25.68023275, "lng": -53.80173725},
+                {"ordem": 2, "dim": 100.22, "lat": -25.680921, "lng": -53.80135666},
+                {"ordem": 3, "dim": 111.98, "lat": -25.68122037, "lng": -53.80201275},
+                {"ordem": 4, "dim": 82.44, "lat": -25.6805995, "lng": -53.8023365}
+            ]
+        },
+        {
+            "id": "6B8E7F2D...",
+            "faces": [
+                {"ordem": 1, "dim": 119.76, "lat": -25.677518, "lng": -53.805506},
+                {"ordem": 2, "dim": 126.25, "lat": -25.676907, "lng": -53.80591183},
+                {"ordem": 3, "dim": 109.99, "lat": -25.67646325, "lng": -53.805237},
+                {"ordem": 4, "dim": 115.27, "lat": -25.67715433, "lng": -53.80477666}
+            ]
+        }
+    ];
+
+    const featureGroup = L.featureGroup().addTo(map);
+
+    quadrasData.forEach(quadra => {
+        const coords = quadra.faces.map(f => [f.lat, f.lng]);
+        
+        // Desenha o polígono conectando os centroides das faces
+        L.polygon(coords, {
+            color: '#2e7d32',
+            weight: 2,
+            fillColor: '#2e7d32',
+            fillOpacity: 0.1
+        }).addTo(featureGroup);
+
+        // Adiciona as etiquetas de dimensão em cada centroide
+        quadra.faces.forEach(face => {
+            L.marker([face.lat, face.lng], {
+                icon: L.divIcon({
+                    className: 'face-label',
+                    html: `${face.dim}m`,
+                    iconSize: [40, 15],
+                    iconAnchor: [20, 7]
+                })
+            }).addTo(featureGroup);
+
+            // Pequeno círculo para indicar o ponto exato do centroide da face
+            L.circleMarker([face.lat, face.lng], {
+                radius: 3,
+                color: '#fff',
+                fillColor: '#2e7d32',
+                fillOpacity: 1,
+                weight: 1
+            }).addTo(featureGroup);
+        });
+    });
+
+    // Enquadra a visão inicial
+    map.fitBounds(featureGroup.getBounds(), { padding: [50, 50] });
+</script>
+
+</body>
+</html>

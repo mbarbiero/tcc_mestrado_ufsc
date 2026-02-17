@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Comparação SC_orientado x OSM</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; background: #f0f0f0; font-family: 'Segoe UI', sans-serif; }
+        #frame-container { width: 800px; height: 600px; position: absolute; top: 0; left: 0; background: white; border-right: 1px solid #ccc; border-bottom: 1px solid #ccc; overflow: hidden; }
+        #map { width: 100%; height: 100%; z-index: 1; }
+        .info-panel { position: absolute; top: 20px; left: 20px; z-index: 1001; background: rgba(255, 255, 255, 0.94); padding: 15px; border-radius: 2px; width: 250px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1px solid #999; }
+        h2 { margin: 0 0 10px 0; font-size: 15px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        .label-group { margin-bottom: 10px; }
+        .label-title { font-size: 9px; color: #666; font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 3px; }
+        .coord-item { font-family: 'Consolas', monospace; font-size: 10px; padding: 5px; background: #fff; border: 1px solid #ddd; color: #333; }
+        .border-sc-ori { border-left: 4px solid #2e7d32; }
+        .border-osm { border-left: 4px solid #d32f2f; }
+        .delta-container { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+        .delta-item { background: #000; color: #fff; padding: 8px; display: flex; justify-content: space-between; align-items: center; border-radius: 2px; font-weight: bold; font-size: 12px; }
+        .delta-label { font-size: 9px; text-transform: uppercase; color: #fff; opacity: 0.8; font-weight: normal; }
+    </style>
+</head>
+<body>
+    <div id="frame-container">
+        <div class="info-panel">
+            <h2>SC_orientado vs OSM</h2>
+            <div class="label-group"><span class="label-title">Centroide SC Orientado (Verde)</span><div id="c-ori" class="coord-item border-sc-ori"></div></div>
+            <div class="label-group"><span class="label-title">Centroide OSM (Vermelho)</span><div id="c-osm" class="coord-item border-osm"></div></div>
+            <span class="label-title">Desvios em Centímetros</span>
+            <div class="delta-container">
+                <div class="delta-item"><span class="delta-label">Δ Latitude</span><span id="d-lat">0.00 cm</span></div>
+                <div class="delta-item"><span class="delta-label">Δ Longitude</span><span id="d-lng">0.00 cm</span></div>
+                <div class="delta-item" style="border-top: 1px solid #555;"><span class="delta-label">Δ Total</span><span id="d-total">0.00 cm</span></div>
+            </div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map', { zoomControl: false, attributionControl: false, maxZoom: 22 });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20 }).addTo(map);
+
+        // 1. DADOS SC ORIENTADO (Verde)
+        const polyOriCoords = [
+            [-25.68108983, -53.80246383], [-25.68132936, -53.80150399],
+            [-25.68037262, -53.80121323], [-25.68013309, -53.80217306]
+        ];
+        let sumOri = { lat: 0, lng: 0 };
+        polyOriCoords.forEach(p => { sumOri.lat += p[0]; sumOri.lng += p[1]; });
+        const finalOri = L.latLng(sumOri.lat/4, sumOri.lng/4);
+        L.polygon(polyOriCoords, { color: '#2e7d32', weight: 2, fillOpacity: 0.15 }).addTo(map);
+        L.circleMarker(finalOri, { radius: 8, color: "#fff", weight: 2, fillColor: "#2e7d32", fillOpacity: 1 }).addTo(map);
+
+        // 2. DADOS OSM (Vermelho) - Cálculo Dinâmico Real
+        const osmGeoms = [
+            { id: "9003F37C", wkt: "-53.8108103 -25.6778927,-53.8023996 -25.6800076,-53.8022714 -25.6800403,-53.801106 -25.6803347,-53.7955719 -25.6817334" },
+            { id: "1558A9D1", wkt: "-53.8034091 -25.6839624,-53.8025915 -25.6811351,-53.8022714 -25.6800403,-53.8020149 -25.6791627" },
+            { id: "F0D334EC", wkt: "-53.8024655 -25.6847714,-53.8014431 -25.6814349,-53.801106 -25.6803347,-53.8002786 -25.677624" },
+            { id: "F54DE0AF", wkt: "-53.8055092 -25.6803838,-53.8025915 -25.6811351,-53.8014431 -25.6814349,-53.7959259 -25.6828776" }
+        ];
+
+        let osmQuadraPoints = [];
+        osmGeoms.forEach(geom => {
+            const pts = geom.wkt.split(',').map(s => {
+                const c = s.trim().split(' ');
+                return [parseFloat(c[1]), parseFloat(c[0])];
+            });
+            // Ordenar pontos da geometria OSM por proximidade ao centroide da nova quadra orientada
+            let sorted = pts.sort((a,b) => 
+                Math.sqrt(Math.pow(finalOri.lat-a[0],2) + Math.pow(finalOri.lng-a[1],2)) - 
+                Math.sqrt(Math.pow(finalOri.lat-b[0],2) + Math.pow(finalOri.lng-b[1],2))
+            );
+            osmQuadraPoints.push(sorted[0], sorted[1]); // Pega os dois mais próximos de cada face
+        });
+
+        // Calcular centroide OSM e ordenar polígono
+        let sumOSM = { lat: 0, lng: 0 };
+        osmQuadraPoints.forEach(p => { sumOSM.lat += p[0]; sumOSM.lng += p[1]; });
+        const finalOSM = L.latLng(sumOSM.lat/8, sumOSM.lng/8);
+
+        osmQuadraPoints.sort((a, b) => Math.atan2(a[0] - finalOSM.lat, a[1] - finalOSM.lng) - Math.atan2(b[0] - finalOSM.lat, b[1] - finalOSM.lng));
+        
+        L.polygon(osmQuadraPoints, { color: '#d32f2f', weight: 1.5, fillOpacity: 0.1, dashArray: '4, 4' }).addTo(map);
+        osmQuadraPoints.forEach(p => L.circleMarker(p, { radius: 2.5, color: "#d32f2f", fillOpacity: 0.8 }).addTo(map));
+        L.circleMarker(finalOSM, { radius: 6, color: "#d32f2f", weight: 2, fillColor: "#fff", fillOpacity: 1 }).addTo(map);
+
+        // 3. CÁLCULOS FINAIS
+        const cmLat = Math.abs((finalOri.lat - finalOSM.lat) * 111320 * 100).toFixed(2);
+        const cmLng = Math.abs((finalOri.lng - finalOSM.lng) * 100450 * 100).toFixed(2);
+        const distTotal = (finalOri.distanceTo(finalOSM) * 100).toFixed(2);
+
+        document.getElementById('c-ori').innerText = `${finalOri.lat.toFixed(8)}, ${finalOri.lng.toFixed(8)}`;
+        document.getElementById('c-osm').innerText = `${finalOSM.lat.toFixed(8)}, ${finalOSM.lng.toFixed(8)}`;
+        document.getElementById('d-lat').innerText = `${cmLat} cm`;
+        document.getElementById('d-lng').innerText = `${cmLng} cm`;
+        document.getElementById('d-total').innerText = `${distTotal} cm`;
+
+        map.setView(finalOri, 19);
+        map.panBy([-120, 0]);
+    </script>
+</body>
+</html>

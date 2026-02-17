@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Análise Geográfica</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; background: #1a1a1a; font-family: 'Segoe UI', sans-serif; }
+        #frame-container { width: 800px; height: 600px; position: absolute; top: 0; left: 0; background: #fff; overflow: hidden; border: 1px solid #ccc; }
+        #map { width: 100%; height: 100%; z-index: 1; }
+        
+        .control-panel { 
+            position: absolute; top: 15px; left: 15px; z-index: 1001; 
+            background: rgba(255, 255, 255, 0.98); padding: 15px; border-radius: 4px; 
+            width: 280px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border: 1px solid #666;
+        }
+
+        .header-title { border-bottom: 2px solid #2e7d32; margin-bottom: 12px; padding-bottom: 5px; }
+        .header-title h1 { margin: 0; font-size: 18px; color: #1a1a1a; letter-spacing: 1px; }
+        .header-title span { font-size: 10px; color: #666; font-weight: bold; text-transform: uppercase; }
+
+        .input-group { margin-bottom: 10px; padding: 8px; border: 1px solid #ddd; border-radius: 3px; }
+        .label-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        label { font-size: 10px; font-weight: bold; text-transform: uppercase; color: #444; }
+        
+        textarea { width: 100%; height: 50px; font-family: 'Consolas', monospace; font-size: 9px; resize: none; box-sizing: border-box; }
+        .input-text { width: 65%; font-size: 10px; padding: 2px; }
+        .input-color { width: 25%; height: 22px; border: none; cursor: pointer; padding: 0; background: none; }
+
+        .btn-calc { 
+            width: 100%; padding: 10px; background: #2e7d32; color: white; border: none; 
+            cursor: pointer; font-weight: bold; text-transform: uppercase; font-size: 11px;
+        }
+        .btn-calc:hover { background: #1b5e20; }
+
+        /* Painel de Resultados */
+        .error-panel { margin-top: 10px; display: none; flex-direction: column; gap: 4px; }
+        .legend-display { margin-bottom: 8px; display: flex; flex-direction: column; gap: 3px; }
+        .legend-item { font-size: 11px; font-weight: bold; display: flex; align-items: center; gap: 8px; }
+        .color-bullet { width: 12px; height: 12px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.2); }
+
+        .error-item { 
+            background: #000; color: #fff; padding: 8px 12px; 
+            display: flex; justify-content: space-between; align-items: center;
+            border-radius: 2px; font-weight: bold; font-size: 13px;
+        }
+        .error-label { font-size: 9px; text-transform: uppercase; color: #fff; opacity: 0.7; font-weight: normal; }
+        
+        .btn-reset { margin-top: 10px; font-size: 9px; color: #2e7d32; background: none; border: none; cursor: pointer; text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+    <div id="frame-container">
+        <div class="control-panel">
+            <div class="header-title">
+                <h1>SuperCIATA</h1>
+                <span>Análise de Desvios Posicionais</span>
+            </div>
+
+            <div id="input-fields">
+                <div class="input-group">
+                    <div class="label-row">
+                        <label>Camada A (Ref.)</label>
+                        <input type="color" id="colorA" class="input-color" value="#d32f2f">
+                    </div>
+                    <input type="text" id="legendaA" class="input-text" value="Referência OSM" style="width:94%">
+                    <textarea id="wktA" placeholder="WKT Camada A..."></textarea>
+                </div>
+
+                <div class="input-group">
+                    <div class="label-row">
+                        <label>Camada B (Ajuste)</label>
+                        <input type="color" id="colorB" class="input-color" value="#2e7d32">
+                    </div>
+                    <input type="text" id="legendaB" class="input-text" value="Ajuste SuperCIATA" style="width:94%">
+                    <textarea id="wktB" placeholder="WKT Camada B..."></textarea>
+                </div>
+                
+                <button id="btnCalcular" class="btn-calc" onclick="compararGeometrias()">Executar Análise</button>
+            </div>
+
+            <div id="errorArea" class="error-panel">
+                <div class="legend-display" id="res-legend"></div>
+                
+                <span style="font-size: 9px; font-weight: bold; color: #666; text-transform: uppercase; margin: 5px 0;">Acurácia Posicional</span>
+                <div class="error-item"><span class="error-label">Δ Latitude</span><span id="err-lat"></span></div>
+                <div class="error-item"><span class="error-label">Δ Longitude</span><span id="err-lng"></span></div>
+                <div class="error-item" style="border-top: 2px solid #555;"><span class="error-label">Desvio Total</span><span id="err-total"></span></div>
+                <button class="btn-reset" onclick="voltarParaInputs()">Nova Análise</button>
+            </div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map', { zoomControl: false, attributionControl: false });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 22 }).addTo(map);
+        let layers = L.featureGroup().addTo(map);
+
+        function getTrueCentroid(latLngs) {
+            let pts = [...latLngs];
+            if (pts[0][0] !== pts[pts.length-1][0] || pts[0][1] !== pts[pts.length-1][1]) pts.push(pts[0]);
+            let area = 0, cx = 0, cy = 0;
+            for (let i = 0; i < pts.length - 1; i++) {
+                let p1 = pts[i], p2 = pts[i+1];
+                let f = (p1[1] * p2[0]) - (p2[1] * p1[0]);
+                area += f;
+                cx += (p1[1] + p2[1]) * f;
+                cy += (p1[0] + p2[0]) * f;
+            }
+            area *= 0.5;
+            if (area === 0) return L.latLng(latLngs[0][0], latLngs[0][1]);
+            return L.latLng(cy / (6 * area), cx / (6 * area));
+        }
+
+        function parseWKT(wkt) {
+            const match = wkt.match(/\(\((.*)\)\)/);
+            if (!match) return null;
+            const latLngs = match[1].split(',').map(p => {
+                const c = p.trim().split(' ');
+                return [parseFloat(c[1]), parseFloat(c[0])];
+            });
+            return { points: latLngs, centroid: getTrueCentroid(latLngs) };
+        }
+
+        function compararGeometrias() {
+            const dataA = parseWKT(document.getElementById('wktA').value);
+            const dataB = parseWKT(document.getElementById('wktB').value);
+
+            if (!dataA || !dataB) return alert("Por favor, preencha os WKTs corretamente.");
+
+            layers.clearLayers();
+            const colorA = document.getElementById('colorA').value;
+            const colorB = document.getElementById('colorB').value;
+            const legA = document.getElementById('legendaA').value;
+            const legB = document.getElementById('legendaB').value;
+
+            L.polygon(dataA.points, { color: colorA, weight: 2, fillOpacity: 0.1, dashArray: '5,5' }).addTo(layers);
+            L.polygon(dataB.points, { color: colorB, weight: 3, fillOpacity: 0.2 }).addTo(layers);
+
+            L.circleMarker(dataA.centroid, { radius: 5, color: colorA, fillColor: '#fff', fillOpacity: 1 }).addTo(layers);
+            L.circleMarker(dataB.centroid, { radius: 5, color: colorB, fillColor: colorB, fillOpacity: 1 }).addTo(layers);
+
+            // Cálculos
+            const dLat = Math.abs((dataA.centroid.lat - dataB.centroid.lat) * 111320 * 100);
+            const dLng = Math.abs((dataA.centroid.lng - dataB.centroid.lng) * 100450 * 100);
+            const dTotal = dataA.centroid.distanceTo(dataB.centroid) * 100;
+
+            document.getElementById('err-lat').innerText = dLat.toFixed(2) + " cm";
+            document.getElementById('err-lng').innerText = dLng.toFixed(2) + " cm";
+            document.getElementById('err-total').innerText = dTotal.toFixed(2) + " cm";
+
+            // Montar Legenda no Painel
+            document.getElementById('res-legend').innerHTML = `
+                <div class="legend-item"><div class="color-bullet" style="background:${colorA}"></div> ${legA}</div>
+                <div class="legend-item"><div class="color-bullet" style="background:${colorB}"></div> ${legB}</div>
+            `;
+
+            document.getElementById('input-fields').style.display = 'none';
+            document.getElementById('errorArea').style.display = 'flex';
+
+            // Ajustar mapa: focar nos polígonos e então mover um pouco
+            map.fitBounds(layers.getBounds(), { padding: [50, 50] });
+            
+            // Move o polígono um pouco para baixo e para a direita em relação ao centro do painel
+            setTimeout(() => {
+                map.panBy([-100, -50]); // Valores negativos movem o mapa, o que faz os polígonos parecerem descer/ir pra direita
+            }, 300);
+        }
+
+        function voltarParaInputs() {
+            document.getElementById('input-fields').style.display = 'block';
+            document.getElementById('errorArea').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
