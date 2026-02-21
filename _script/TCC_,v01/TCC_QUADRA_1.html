@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <title>Debug TCC - Visualizador</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        .controls { background: #2c3e50; color: white; padding: 15px; z-index: 1000; display: flex; gap: 20px; }
+        #map { flex-grow: 1; }
+        .legend { background: white; padding: 10px; position: absolute; bottom: 20px; left: 20px; z-index: 1000; border: 1px solid #ccc; font-size: 11px; }
+    </style>
+</head>
+<body>
+
+<div class="controls">
+    <input type="file" id="csvFile" accept=".csv" />
+    <button id="btnExport" style="padding: 8px;">Copiar WKT</button>
+    <div id="status">Abra o Console (F12) e selecione o arquivo.</div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView([-25.666, -53.806], 18);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    const METERS_PER_LAT_DEG = 111320;
+    const DEG_TO_RAD = Math.PI / 180;
+    let wktResults = "";
+
+    document.getElementById('csvFile').addEventListener('change', function(e) {
+        console.log("--- Início do Carregamento ---");
+        const reader = new FileReader();
+        reader.onload = function(event) { 
+            console.log("Arquivo lido com sucesso.");
+            processarCsv(event.target.result); 
+        };
+        reader.readAsText(e.target.files[0]);
+    });
+
+    function parseWKT(wkt) {
+        if (!wkt) return null;
+        try {
+            let clean = wkt.replace(/"/g, '').replace('POINT(', '').replace(')', '').trim();
+            let pts = clean.split(/\s+/); 
+            return { lng: parseFloat(pts[0]), lat: parseFloat(pts[1]) };
+        } catch (e) {
+            console.error("Erro ao processar WKT:", wkt);
+            return null;
+        }
+    }
+
+    function processarCsv(csvText) {
+        const lines = csvText.trim().split('\n');
+        console.log("Total de linhas detectadas:", lines.length);
+
+        // Detectar delimitador automaticamente
+        const firstLine = lines[0];
+        const delimiter = firstLine.includes(';') ? ';' : ',';
+        console.log("Delimitador detectado:", delimiter);
+        console.log("Cabeçalho:", firstLine);
+
+        const rawData = lines.slice(1).map((row, index) => {
+            const c = row.split(delimiter);
+            // Log da primeira linha de dados para conferência de índices
+            if (index === 0) console.log("Exemplo de linha 1 processada:", c);
+            
+            return {
+                codigo: c[0],
+                v1: parseWKT(c[2]),
+                v2: parseWKT(c[3]),
+                centroide: parseWKT(c[5]),
+                ordem: parseInt(c[6]),
+                dim: parseFloat(c[7])
+            };
+        }).filter(f => f && f.codigo && f.centroide);
+
+        console.log("Linhas válidas após filtragem:", rawData.length);
+
+        if (rawData.length === 0) {
+            console.error("Nenhum dado válido encontrado! Verifique se as colunas estão na ordem correta ou se o WKT está no formato POINT(X Y).");
+            document.getElementById('status').innerText = "Erro: Nenhum dado válido. Veja o Console (F12).";
+            return;
+        }
+
+        const quadrasMap = {};
+        rawData.forEach(f => {
+            if (!quadrasMap[f.codigo]) quadrasMap[f.codigo] = [];
+            quadrasMap[f.codigo].push(f);
+        });
+
+        console.log("Total de quadras únicas:", Object.keys(quadrasMap).length);
+
+        map.eachLayer(l => { if(l instanceof L.Polygon || l instanceof L.CircleMarker) map.removeLayer(l); });
+        wktResults = "CODIGO;WKT_TRANSLADADO\n";
+
+        Object.keys(quadrasMap).forEach(key => {
+            console.log(`Processando Quadra: ${key}`);
+            const faces = quadrasMap[key];
+            const anc = faces.reduce((prev, curr) => (prev.centroide.lat > curr.centroide.lat) ? prev : curr);
+            
+            console.log(`Âncora (Norte) da quadra ${key}: Face Ordem ${anc.ordem}`);
+
+            const cosLat = Math.cos(anc.centroide.lat * DEG_TO_RAD);
+            const latConv = 1 / METERS_PER_LAT_DEG;
+            const lngConv = 1 / (METERS_PER_LAT_DEG * cosLat);
+
+            // Azimute
+            let dx = (anc.v2.lng - anc.v1.lng) * cosLat;
+            let dy = (anc.v2.lat - anc.v1.lat);
+            let anguloRad = Math.atan2(dy, dx);
+            if (dx < 0) anguloRad += Math.PI;
+
+            // Dimensões com fallback simples
+            const dimN = anc.dim;
+            const dimL = (faces.find(f => f.ordem === (anc.ordem % 4 + 1)) || {dim: dimN}).dim;
+            const dimS = (faces.find(f => f.ordem === ((anc.ordem + 1) % 4 + 1)) || {dim: dimN}).dim;
+            const dimO = (faces.find(f => f.ordem === ((anc.ordem + 2) % 4 + 1)) || {dim: dimN}).dim;
+
+            const ptsMetros = [{x: -dimN/2, y: 0}, {x: dimN/2, y: 0}, {x: dimN/2, y: -dimL}, {x: -dimN/2, y: -dimO}];
+
+            // Desenhar Original
+            const vOrig = ptsMetros.map(p => [anc.centroide.lat + (p.y * latConv), anc.centroide.lng + (p.x * lngConv)]);
+            L.polygon(vOrig, {color: '#95a5a6', weight: 1, dashArray: '5,5', fill: false}).addTo(map);
+
+            // Desenhar Girada
+            const vGirada = ptsMetros.map(p => {
+                const rx = p.x * Math.cos(anguloRad) - p.y * Math.sin(anguloRad);
+                const ry = p.x * Math.sin(anguloRad) + p.y * Math.cos(anguloRad);
+                return [anc.centroide.lat + (ry * latConv), anc.centroide.lng + (rx * lngConv)];
+            });
+            L.polygon(vGirada, {color: '#27ae60', weight: 1.5, fillOpacity: 0.1}).addTo(map);
+
+            // Translação
+            const cGir = [0,0]; vGirada.forEach(v=>{cGir[0]+=v[0]; cGir[1]+=v[1]}); 
+            cGir[0]/=4; cGir[1]/=4;
+            
+            const pointsOSM = faces.flatMap(f => [[f.v1.lat, f.v1.lng], [f.v2.lat, f.v2.lng]]);
+            const cOSM = [0,0]; pointsOSM.forEach(p=>{cOSM[0]+=p[0]; cOSM[1]+=p[1]});
+            cOSM[0]/=pointsOSM.length; cOSM[1]/=pointsOSM.length;
+
+            const offLat = cOSM[0] - cGir[0];
+            const offLng = cOSM[1] - cGir[1];
+
+            const vTrans = vGirada.map(v => [v[0] + offLat, v[1] + offLng]);
+            const polyTrans = L.polygon(vTrans, {color: '#2980b9', weight: 2.5, fillOpacity: 0.2}).addTo(map);
+
+            // WKT
+            const coordsWkt = vTrans.map(v => `${v[1]} ${v[0]}`).join(', ');
+            wktResults += `${key};POLYGON((${coordsWkt}, ${vTrans[0][1]} ${vTrans[0][0]}))\n`;
+
+            map.fitBounds(polyTrans.getBounds());
+        });
+
+        document.getElementById('status').innerText = "Quadras carregadas. Veja logs no Console.";
+        console.log("--- Processamento Concluído ---");
+    }
+
+    document.getElementById('btnExport').onclick = () => {
+        navigator.clipboard.writeText(wktResults);
+        alert("WKT copiado!");
+    };
+</script>
+</body>
+</html>

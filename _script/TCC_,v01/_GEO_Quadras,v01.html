@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA v21.0 - Dimensões e Centroides</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; display: flex; font-family: "Segoe UI", sans-serif; }
+        #sidebar { width: 380px; height: 100vh; background: #f8f9fa; border-right: 2px solid #000; padding: 15px; z-index: 1000; display: flex; flex-direction: column; box-sizing: border-box; }
+        #map { flex-grow: 1; height: 100vh; }
+        h2 { font-size: 12px; text-transform: uppercase; margin: 10px 0 5px 0; border-bottom: 2px solid #000; padding-bottom: 3px; }
+        #statusLog { font-family: monospace; font-size: 11px; background: #000; color: #0f0; padding: 10px; height: 120px; overflow-y: auto; margin-bottom: 10px; }
+        .btn { width: 100%; padding: 10px; background: #000; color: #fff; border: none; cursor: pointer; font-weight: bold; font-size: 10px; margin-top: 5px; }
+        .btn-save { background: #27ae60; margin-top: auto; }
+        .face-label { background: #2c3e50; color: #fff; border-radius: 50%; width: 22px; height: 22px; text-align: center; font-size: 10px; line-height: 22px; border: 2px solid #fff; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2>1. Entrada de Dados</h2>
+    <input type="file" id="csvQuadras" accept=".csv" style="font-size:10px; width:100%">
+    <input type="file" id="csvLogradouros" accept=".csv" style="font-size:10px; width:100%; margin-top:5px;">
+    <button class="btn" onclick="inicializar()">CARREGAR CAPANEMA</button>
+
+    <h2>2. Status</h2>
+    <div id="statusLog">Aguardando CSV...</div>
+
+    <h2>3. Exportação Final</h2>
+    <button class="btn btn-save" onclick="exportarCSV()">BAIXAR RESULTADO (CSV)</button>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map', { zoomControl: false, maxZoom: 20 }).setView([-25.67, -53.79], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, maxNativeZoom: 19, opacity: 0.7 }).addTo(map);
+    
+    const camadaQuadras = L.featureGroup().addTo(map);
+    const camadaMarkers = L.featureGroup().addTo(map);
+
+    let dbLogradouros = [];
+    let resultadosExportacao = []; 
+    let dictPoligonos = {};
+
+    // Cálculo da distância em metros entre dois pontos (Haversine)
+    function calcularDistanciaMetros(lat1, lon1, lat2, lon2) {
+        const R = 6371000; // Raio da Terra em metros
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    }
+
+    function parseWKT(wkt) {
+        const coordsRaw = wkt.replace(/[A-Za-z\(\)]/g, "").trim();
+        return coordsRaw.split(",").map(p => {
+            const parts = p.trim().split(" ");
+            return [parseFloat(parts[1]), parseFloat(parts[0])]; 
+        });
+    }
+
+    function calcularAzimute(p1, p2) {
+        const dLon = (p2[1] - p1[1]) * Math.PI / 180;
+        const y = Math.sin(dLon) * Math.cos(p2[0] * Math.PI / 180);
+        const x = Math.cos(p1[0] * Math.PI / 180) * Math.sin(p2[0] * Math.PI / 180) -
+                  Math.sin(p1[0] * Math.PI / 180) * Math.cos(p2[0] * Math.PI / 180) * Math.cos(dLon);
+        return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+    }
+
+    async function inicializar() {
+        const fQ = document.getElementById('csvQuadras').files[0];
+        const fL = document.getElementById('csvLogradouros').files[0];
+        if(!fQ || !fL) return alert("Selecione os arquivos.");
+
+        const txtL = await fL.text();
+        dbLogradouros = txtL.split('\n').slice(1).map(l => {
+            const c = l.split(',');
+            return c.length >= 2 ? { nom: c[0].replace(/"/g,''), id: c[1].trim() } : null;
+        }).filter(x => x);
+
+        const txtQ = await fQ.text();
+        const linhas = txtQ.split('\n').slice(1);
+        camadaQuadras.clearLayers();
+
+        linhas.forEach(linha => {
+            const colunas = linha.match(/(".*?"|[^,]+)/g);
+            if (colunas && colunas.length >= 4) {
+                const codigo = colunas[2].replace(/"/g, '');
+                const wkt = colunas[3].replace(/"/g, '');
+                const coords = parseWKT(wkt);
+
+                const poly = L.polygon(coords, { color: '#2c3e50', weight: 1, fillOpacity: 0.2 }).addTo(camadaQuadras);
+                dictPoligonos[codigo] = poly;
+                poly.on('click', () => abrirQuadra(codigo, coords, poly));
+            }
+        });
+        map.fitBounds(camadaQuadras.getBounds());
+    }
+
+    function abrirQuadra(codigo, coords, layer) {
+        camadaMarkers.clearLayers();
+        for (let i = 0; i < coords.length - 1; i++) {
+            const p1 = coords[i];
+            const p2 = coords[i+1];
+            const az = calcularAzimute(p1, p2);
+            const dist = calcularDistanciaMetros(p1[0], p1[1], p2[0], p2[1]);
+            const cLat = (p1[0]+p2[0])/2;
+            const cLng = (p1[1]+p2[1])/2;
+
+            const options = dbLogradouros.map(l => `<option value="${l.id}">${l.nom}</option>`).join('');
+
+            L.marker([cLat, cLng], { icon: L.divIcon({ className: 'face-label', html: i+1 }) })
+                .addTo(camadaMarkers)
+                .bindPopup(`
+                    <b>Face ${i+1}</b><br>
+                    Dimensão: <b>${dist.toFixed(2)} m</b><br>
+                    Azimute: ${az.toFixed(1)}°<br>
+                    <select onchange="vincular('${codigo}', ${i+1}, this.value, this.options[this.selectedIndex].text, ${az.toFixed(2)}, ${dist.toFixed(2)}, ${cLat}, ${cLng})">
+                        <option>Vincular...</option>${options}
+                    </select>
+                `);
+        }
+    }
+
+    function vincular(cod, face, idL, nomeL, az, dist, lat, lng) {
+        resultadosExportacao = resultadosExportacao.filter(r => !(r.codigo === cod && r.face === face));
+        resultadosExportacao.push({ cod, face, idL, nomeL, az, dist, lat, lng });
+        if(dictPoligonos[cod]) dictPoligonos[cod].setStyle({ color: '#27ae60', fillOpacity: 0.5 });
+        document.getElementById('statusLog').innerHTML = `Quadra ${cod}: Face ${face} OK!<br>Total: ${resultadosExportacao.length}`;
+    }
+
+    function exportarCSV() {
+        if(resultadosExportacao.length === 0) return alert("Sem dados.");
+        let csv = "CODIGO_CARTOGRAFICO,FACE,DIMENSAO_M,AZIMUTE,LAT_CENTROIDE,LNG_CENTROIDE,SC_ID_LOGRADOURO,NOM_LOGRADOURO\n";
+        resultadosExportacao.forEach(r => {
+            csv += `${r.cod},${r.face},${r.dist},${r.az},${r.lat},${r.lng},${r.idL},"${r.nomeL}"\n`;
+        });
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute("download", "CAPANEMA_FINAL_DIMENSOES.csv");
+        link.click();
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA v23.0 - Reconstrução Horizontal</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; display: flex; font-family: "Segoe UI", sans-serif; }
+        #sidebar { width: 350px; height: 100vh; background: #f8f9fa; border-right: 2px solid #000; padding: 15px; box-sizing: border-box; z-index: 1000; }
+        #map { flex-grow: 1; height: 100vh; }
+        h2 { font-size: 14px; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 5px; }
+        #log { font-family: monospace; font-size: 11px; background: #000; color: #0f0; padding: 10px; height: 250px; overflow-y: auto; margin-top: 10px; }
+        .btn { width: 100%; padding: 10px; background: #000; color: #fff; border: none; cursor: pointer; font-weight: bold; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2>Reconstrução Horizontal</h2>
+    <p style="font-size: 10px;">Baseado no centroide Norte e dimensões das faces.</p>
+    <input type="file" id="csvFile" accept=".csv" style="width:100%">
+    <button class="btn" onclick="reconstruirHorizontal()">GERAR QUADRA TEÓRICA</button>
+    <div id="log">Aguardando CSV...</div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView([-25.67, -53.79], 18);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { opacity: 0.4 }).addTo(map);
+    const camada = L.featureGroup().addTo(map);
+
+    const M_TO_DEG = 1 / 111000; // Aproximação de metros para graus
+
+    async function reconstruirHorizontal() {
+        const file = document.getElementById('csvFile').files[0];
+        if (!file) return;
+
+        const texto = await file.text();
+        const linhas = texto.split('\n').slice(1);
+        camada.clearLayers();
+
+        let dados = linhas.map(l => {
+            const c = l.split(',');
+            if (c.length < 6) return null;
+            return {
+                cod: c[0], face: parseInt(c[1]), dim: parseFloat(c[2]),
+                lat: parseFloat(c[4]), lng: parseFloat(c[5])
+            };
+        }).filter(x => x);
+
+        // 1. Encontrar a Face mais ao Norte (Maior Latitude)
+        const faceNorte = dados.reduce((prev, curr) => (prev.lat > curr.lat) ? prev : curr);
+        
+        // 2. Mapear dimensões (assumindo ordem: 1-Norte, 2-Leste, 3-Sul, 4-Oeste)
+        // Se a ordem no CSV for diferente, o script buscará pelos IDs
+        const dN = dados.find(d => d.face === 1)?.dim || 0;
+        const dL = dados.find(d => d.face === 2)?.dim || 0;
+        const dS = dados.find(d => d.face === 3)?.dim || 0;
+        const dO = dados.find(d => d.face === 4)?.dim || 0;
+
+        const lngAdj = Math.cos(faceNorte.lat * Math.PI / 180);
+
+        // 3. Definir Vértices a partir do Centroide Norte (Âncora)
+        // Ponto A (Noroeste) e Ponto B (Nordeste)
+        const latN = faceNorte.lat;
+        const lngN = faceNorte.lng;
+
+        const v1_lat = latN;
+        const v1_lng = lngN - ((dN / 2) * M_TO_DEG / lngAdj); // Noroeste
+
+        const v2_lat = latN;
+        const v2_lng = lngN + ((dN / 2) * M_TO_DEG / lngAdj); // Nordeste
+
+        // 4. Descer as verticais (Leste e Oeste)
+        // Usamos a dimensão da face Oeste e Leste para fechar o retângulo
+        const v3_lat = v2_lat - (dL * M_TO_DEG);
+        const v3_lng = v2_lng; // Sudeste
+
+        const v4_lat = v1_lat - (dO * M_TO_DEG);
+        const v4_lng = v1_lng; // Sudoeste
+
+        // 5. Desenhar Quadrilátero
+        const pontos = [[v1_lat, v1_lng], [v2_lat, v2_lng], [v3_lat, v3_lng], [v4_lat, v4_lng]];
+        L.polygon(pontos, { color: 'red', weight: 3, fillOpacity: 0.2 }).addTo(camada);
+
+        // Marcar apenas o Centroide Norte
+        L.marker([latN, lngN]).addTo(camada).bindPopup("Centroide Âncora (Norte)");
+
+        let log = `<b>Quadra Reconstruída</b><br>`;
+        log += `Âncora Norte: ${latN.toFixed(6)}<br>`;
+        log += `Dimensões Usadas:<br>N: ${dN}m | S: ${dS}m<br>L: ${dL}m | O: ${dO}m<br>`;
+        log += `<br><i>Nota: Se N != S ou L != O, o polígono demonstrará a inclinação/trapézio real.</i>`;
+        
+        document.getElementById('log').innerHTML = log;
+        map.fitBounds(camada.getBounds());
+    }
+</script>
+</body>
+</html>
