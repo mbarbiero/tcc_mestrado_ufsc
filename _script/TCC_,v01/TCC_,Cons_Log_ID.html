@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>OSM Overpass - Consulta por ID</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f4f7f6; display: flex; justify-content: center; padding: 20px; }
+        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
+        h2 { color: #2c3e50; font-size: 18px; margin-top: 0; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #2980b9; }
+        #resultado { margin-top: 20px; padding: 15px; border-radius: 4px; display: none; }
+        .sucesso { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .erro { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .loading { color: #666; font-style: italic; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>Consultar Logradouro OSM</h2>
+    <p style="font-size: 12px; color: #666;">Insira o ID do Way (Ex: 12345678)</p>
+    <input type="text" id="osmId" placeholder="Digite o ID do logradouro...">
+    <button onclick="consultarOSM()">Buscar Nome</button>
+    
+    <div id="loading" class="loading" style="display:none;">Consultando Overpass API...</div>
+    <div id="resultado"></div>
+</div>
+
+<script>
+    async function consultarOSM() {
+        const id = document.getElementById('osmId').value.trim();
+        const resDiv = document.getElementById('resultado');
+        const loader = document.getElementById('loading');
+        
+        if (!id) return;
+
+        // Resetar interface
+        resDiv.style.display = 'none';
+        loader.style.display = 'block';
+
+        // Query Overpass: busca o way pelo ID e retorna em JSON
+        const query = `[out:json];way(${id});out tags;`;
+        const url = "https://overpass-api.de/api/interpreter?data=" + encodeURIComponent(query);
+
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+
+            loader.style.display = 'none';
+            resDiv.style.display = 'block';
+
+            if (data.elements && data.elements.length > 0) {
+                const tags = data.elements[0].tags;
+                const nome = tags.name || tags["name:pt"] || "Nome não disponível nas tags";
+                
+                resDiv.className = 'sucesso';
+                resDiv.innerHTML = `<strong>Nome encontrado:</strong><br>${nome}`;
+            } else {
+                resDiv.className = 'erro';
+                resDiv.innerHTML = "ID não encontrado no OpenStreetMap.";
+            }
+        } catch (error) {
+            loader.style.display = 'none';
+            resDiv.style.display = 'block';
+            resDiv.className = 'erro';
+            resDiv.innerHTML = "Erro ao conectar com a Overpass API.";
+            console.error(error);
+        }
+    }
+</script>
+
+</body>
+</html>{
+  "CI_ID_QUADRA": "",
+  "SC_ID_LOGRADOURO": "0C5BD29F",
+  "NOM_LOGRADOURO": "RUA ANTONIO NIEHEUS",
+  "OSM_NOM_LOGRADOURO": "Rua Ant",
+  "OSM_ID": 148762581,
+  "WKT": "LINESTRING (-47.2009873 -1.2005919, -47.2005433 -1.2006593, -47.2001116 -1.2006928, -47.1996535 -1.2006926, -47.1990251 -1.2006542, -47.1984062 -1.2006254, -47.1976424 -1.2005744, -47.1956793 -1.2003796)"
+}
