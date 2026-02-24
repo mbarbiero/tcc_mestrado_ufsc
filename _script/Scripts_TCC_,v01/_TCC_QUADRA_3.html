@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <title>Debug TCC - Visualizador (Centroides e Ordem)</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        .controls { background: #2c3e50; color: white; padding: 15px; z-index: 1000; display: flex; gap: 20px; }
+        #map { flex-grow: 1; }
+        .legend { background: white; padding: 10px; position: absolute; bottom: 20px; left: 20px; z-index: 1000; border: 1px solid #ccc; font-size: 11px; }
+        /* Estilo para o número da ordem da face */
+        .order-label {
+            background: rgba(44, 62, 80, 0.9);
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            text-align: center;
+            line-height: 20px;
+            font-size: 10px;
+            font-weight: bold;
+            border: 1px solid white;
+        }
+    </style>
+</head>
+<body>
+
+<div class="controls">
+    <input type="file" id="csvFile" accept=".csv" />
+    <button id="btnExport" style="padding: 8px;">Copiar WKT</button>
+    <div id="status">Selecione o arquivo CSV para ver centroides e ordem.</div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView([-25.666, -53.806], 18);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    const METERS_PER_LAT_DEG = 111320;
+    const DEG_TO_RAD = Math.PI / 180;
+    let wktResults = "";
+
+    document.getElementById('csvFile').addEventListener('change', function(e) {
+        console.log("--- Início do Carregamento ---");
+        const reader = new FileReader();
+        reader.onload = function(event) { 
+            console.log("Arquivo lido com sucesso.");
+            processarCsv(event.target.result); 
+        };
+        reader.readAsText(e.target.files[0]);
+    });
+
+    function parseWKT(wkt) {
+        if (!wkt) return null;
+        try {
+            let clean = wkt.replace(/"/g, '').replace('POINT(', '').replace(')', '').trim();
+            let pts = clean.split(/\s+/); 
+            return { lng: parseFloat(pts[0]), lat: parseFloat(pts[1]) };
+        } catch (e) {
+            console.error("Erro ao processar WKT:", wkt);
+            return null;
+        }
+    }
+
+    function processarCsv(csvText) {
+        const lines = csvText.trim().split('\n');
+        const firstLine = lines[0];
+        const delimiter = firstLine.includes(';') ? ';' : ',';
+
+        const rawData = lines.slice(1).map((row) => {
+            const c = row.split(delimiter);
+            return {
+                codigo: c[0],
+                v1: parseWKT(c[2]),
+                v2: parseWKT(c[3]),
+                centroide: parseWKT(c[5]),
+                ordem: parseInt(c[6]),
+                dim: parseFloat(c[7])
+            };
+        }).filter(f => f && f.codigo && f.centroide);
+
+        if (rawData.length === 0) {
+            document.getElementById('status').innerText = "Erro: Nenhum dado válido.";
+            return;
+        }
+
+        const quadrasMap = {};
+        rawData.forEach(f => {
+            if (!quadrasMap[f.codigo]) quadrasMap[f.codigo] = [];
+            quadrasMap[f.codigo].push(f);
+        });
+
+        // Limpar camadas
+        map.eachLayer(l => { if(l instanceof L.Polygon || l instanceof L.CircleMarker || l instanceof L.Marker) map.removeLayer(l); });
+        wktResults = "CODIGO;WKT_TRANSLADADO\n";
+
+        Object.keys(quadrasMap).forEach(key => {
+            const faces = quadrasMap[key];
+            
+            // Renderizar Centroides e Ordem de cada face
+            faces.forEach(face => {
+                // Ponto azul para o Centroide
+                L.circleMarker([face.centroide.lat, face.centroide.lng], {
+                    radius: 5,
+                    color: '#3498db',
+                    fillColor: '#3498db',
+                    fillOpacity: 0.8
+                }).addTo(map).bindPopup(`Quadra: ${key}<br>Ordem: ${face.ordem}`);
+
+                // Label com o número da Ordem
+                L.marker([face.centroide.lat, face.centroide.lng], {
+                    icon: L.divIcon({
+                        className: 'order-label',
+                        html: face.ordem,
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
+                    })
+                }).addTo(map);
+            });
+
+            // Lógica de Translação e Desenho das Quadras
+            const anc = faces.reduce((prev, curr) => (prev.centroide.lat > curr.centroide.lat) ? prev : curr);
+            const cosLat = Math.cos(anc.centroide.lat * DEG_TO_RAD);
+            const latConv = 1 / METERS_PER_LAT_DEG;
+            const lngConv = 1 / (METERS_PER_LAT_DEG * cosLat);
+
+            let dx = (anc.v2.lng - anc.v1.lng) * cosLat;
+            let dy = (anc.v2.lat - anc.v1.lat);
+            let anguloRad = Math.atan2(dy, dx);
+            if (dx < 0) anguloRad += Math.PI;
+
+            const dimN = anc.dim;
+            const dimL = (faces.find(f => f.ordem === (anc.ordem % 4 + 1)) || {dim: dimN}).dim;
+            const dimS = (faces.find(f => f.ordem === ((anc.ordem + 1) % 4 + 1)) || {dim: dimN}).dim;
+            const dimO = (faces.find(f => f.ordem === ((anc.ordem + 2) % 4 + 1)) || {dim: dimN}).dim;
+
+            const ptsMetros = [{x: -dimN/2, y: 0}, {x: dimN/2, y: 0}, {x: dimN/2, y: -dimL}, {x: -dimN/2, y: -dimO}];
+
+            const vGirada = ptsMetros.map(p => {
+                const rx = p.x * Math.cos(anguloRad) - p.y * Math.sin(anguloRad);
+                const ry = p.x * Math.sin(anguloRad) + p.y * Math.cos(anguloRad);
+                return [anc.centroide.lat + (ry * latConv), anc.centroide.lng + (rx * lngConv)];
+            });
+
+            const pointsOSM = faces.flatMap(f => [[f.v1.lat, f.v1.lng], [f.v2.lat, f.v2.lng]]);
+            const cOSM = [0,0]; 
+            pointsOSM.forEach(p=>{cOSM[0]+=p[0]; cOSM[1]+=p[1]});
+            cOSM[0]/=pointsOSM.length; cOSM[1]/=pointsOSM.length;
+
+            const cGir = [0,0]; 
+            vGirada.forEach(v=>{cGir[0]+=v[0]; cGir[1]+=v[1]}); 
+            cGir[0]/=4; cGir[1]/=4;
+
+            const vTrans = vGirada.map(v => [v[0] + (cOSM[0] - cGir[0]), v[1] + (cOSM[1] - cGir[1])]);
+            const polyTrans = L.polygon(vTrans, {color: '#2980b9', weight: 2.5, fillOpacity: 0.2}).addTo(map);
+
+            const coordsWkt = vTrans.map(v => `${v[1]} ${v[0]}`).join(', ');
+            wktResults += `${key};POLYGON((${coordsWkt}, ${vTrans[0][1]} ${vTrans[0][0]}))\n`;
+
+            map.fitBounds(polyTrans.getBounds());
+        });
+
+        document.getElementById('status').innerText = "Quadras, Centroides e Ordem exibidos.";
+    }
+
+    document.getElementById('btnExport').onclick = () => {
+        navigator.clipboard.writeText(wktResults);
+        alert("WKT copiado!");
+    };
+</script>
+</body>
+</html>
