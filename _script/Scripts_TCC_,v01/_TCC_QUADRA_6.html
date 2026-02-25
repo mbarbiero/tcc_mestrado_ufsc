@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA v31.0 - Processamento Global</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; display: flex; font-family: "Segoe UI", sans-serif; background: #1a1a1a; color: white; }
+        #sidebar { width: 380px; height: 100vh; background: #222; padding: 15px; display: flex; flex-direction: column; box-sizing: border-box; border-right: 2px solid #000; }
+        #map { flex-grow: 1; height: 100vh; }
+        #statusLog { font-family: monospace; font-size: 10px; background: #000; color: #0f0; padding: 10px; flex-grow: 1; overflow-y: auto; border: 1px solid #333; margin-top: 10px; }
+        .btn { width: 100%; padding: 10px; background: #6c5ce7; color: #fff; border: none; cursor: pointer; font-weight: bold; margin-top: 5px; }
+        h2 { font-size: 11px; text-transform: uppercase; color: #a29bfe; border-bottom: 1px solid #444; padding-bottom: 5px; margin-top: 15px; }
+        input[type="file"] { font-size: 10px; width: 100%; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2>1. Arquivos Locais</h2>
+    <label style="font-size:10px">FACES_GEO.csv</label>
+    <input type="file" id="fileFaces" accept=".csv">
+    
+    <label style="font-size:10px; margin-top:10px">OSM_LOGRADOUROS.csv</label>
+    <input type="file" id="fileLogra" accept=".csv">
+    
+    <button class="btn" onclick="processarTudo()">PROCESSAR TODAS AS QUADRAS</button>
+
+    <h2>2. Relatório de Geometria</h2>
+    <div id="statusLog">Aguardando início...</div>
+    
+    <button class="btn" style="background:#27ae60;" onclick="copiarWKT()">COPIAR WKT CONSOLIDADO</button>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView([-25.666, -53.806], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { opacity: 0.2, className: 'map-dark' }).addTo(map);
+    
+    const camadaQuadras = L.featureGroup().addTo(map);
+    const camadaDebug = L.featureGroup().addTo(map);
+
+    let wktFinal = "CODIGO;WKT\n";
+
+    function addLog(msg, cor="#0f0") {
+        const log = document.getElementById('statusLog');
+        log.innerHTML += `<div style="color:${cor}">> ${msg}</div>`;
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function parseWKT(wkt) {
+        if (!wkt) return [];
+        const match = wkt.match(/\(([^)]+)\)/);
+        if (!match) return [];
+        return match[1].split(',').map(pair => {
+            const c = pair.trim().split(/\s+/);
+            return [parseFloat(c[1]), parseFloat(c[0])]; // [lat, lng]
+        });
+    }
+
+    function getDist(p1, p2) {
+        return Math.sqrt(Math.pow(p1[0]-p2[0], 2) + Math.pow(p1[1]-p2[1], 2));
+    }
+
+    async function processarTudo() {
+        const fFaces = document.getElementById('fileFaces').files[0];
+        const fLogra = document.getElementById('fileLogra').files[0];
+        if (!fFaces || !fLogra) return alert("Selecione os dois arquivos CSV.");
+
+        addLog("Consolidando segmentos de logradouros...", "#f1c40f");
+        const txtLogra = await fLogra.text();
+        const linhasL = txtLogra.split('\n');
+        const sepL = linhasL[0].includes(';') ? ';' : ',';
+        const logradourosMap = {};
+
+        linhasL.slice(1).forEach(l => {
+            const c = l.split(sepL);
+            if (c.length >= 5) {
+                const id = c[1]?.trim();
+                const pts = parseWKT(c[4]);
+                if (!logradourosMap[id]) logradourosMap[id] = [];
+                logradourosMap[id].push(...pts);
+            }
+        });
+
+        addLog("Agrupando quadras por código...", "#f1c40f");
+        const txtFaces = await fFaces.text();
+        const linhasF = txtFaces.split('\n');
+        const sepF = linhasF[0].includes(';') ? ';' : ',';
+        const quadrasAgrupadas = {};
+
+        linhasF.slice(1).forEach(l => {
+            const c = l.split(sepF);
+            if (c.length < 6) return;
+            const cod = c[0].trim();
+            if (!quadrasAgrupadas[cod]) quadrasAgrupadas[cod] = [];
+            quadrasAgrupadas[cod].push({
+                face: parseInt(c[1]),
+                centroide: [parseFloat(c[3]), parseFloat(c[4])],
+                idLog: c[5]?.trim()
+            });
+        });
+
+        camadaQuadras.clearLayers();
+        camadaDebug.clearLayers();
+        wktFinal = "CODIGO;WKT\n";
+
+        const codigos = Object.keys(quadrasAgrupadas).sort();
+        let sucessos = 0;
+
+        codigos.forEach(cod => {
+            const faces = quadrasAgrupadas[cod].sort((a,b) => a.face - b.face);
+            let verticesQuadra = [];
+
+            for (let i = 0; i < faces.length; i++) {
+                const f1 = faces[i];
+                const f2 = faces[(i + 1) % faces.length];
+                const pts1 = logradourosMap[f1.idLog] || [];
+                const pts2 = logradourosMap[f2.idLog] || [];
+
+                let candidatos = [];
+                // Busca pontos próximos entre os dois logradouros
+                pts1.forEach(p1 => {
+                    pts2.forEach(p2 => {
+                        const d = getDist(p1, p2);
+                        if (d < 0.00015) { // Tolerância ampliada para compensar imprecisões OSM
+                            // O "ímã": calcula proximidade média aos centroides das faces
+                            const dAtracao = (getDist(p1, f1.centroide) + getDist(p1, f2.centroide)) / 2;
+                            candidatos.push({ ponto: p1, dAtracao: dAtracao });
+                        }
+                    });
+                });
+
+                if (candidatos.length > 0) {
+                    candidatos.sort((a, b) => a.dAtracao - b.dAtracao);
+                    verticesQuadra.push(candidatos[0].ponto);
+                }
+            }
+
+            if (verticesQuadra.length >= 3) {
+                const poly = L.polygon(verticesQuadra, {
+                    color: '#8e44ad',
+                    weight: 2,
+                    fillOpacity: 0.4
+                }).addTo(camadaQuadras);
+
+                // Marcar vértices roxos
+                verticesQuadra.forEach(v => {
+                    L.circleMarker(v, { radius: 4, color: '#a29bfe', fillColor: '#8e44ad', fillOpacity: 1 }).addTo(camadaDebug);
+                });
+
+                const wkt = "POLYGON((" + verticesQuadra.map(v => `${v[1]} ${v[0]}`).join(", ") + `, ${verticesQuadra[0][1]} ${verticesQuadra[0][0]}))`;
+                wktFinal += `${cod};${wkt}\n`;
+                sucessos++;
+            }
+        });
+
+        addLog(`Concluído: ${sucessos} quadras geradas.`, "#55efc4");
+        if(camadaQuadras.getLayers().length > 0) map.fitBounds(camadaQuadras.getBounds());
+    }
+
+    function copiarWKT() {
+        navigator.clipboard.writeText(wktFinal);
+        alert("WKT de todas as quadras copiado!");
+    }
+</script>
+</body>
+</html>

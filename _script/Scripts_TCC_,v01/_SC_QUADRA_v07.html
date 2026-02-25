@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA v54.1 - Exportação Nomeada</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; display: flex; font-family: "Segoe UI", sans-serif; background: #1a1a1a; color: white; }
+        #sidebar { width: 350px; height: 100vh; background: #222; padding: 20px; box-sizing: border-box; border-right: 2px solid #000; }
+        #map { flex-grow: 1; height: 100vh; }
+        .btn { width: 100%; padding: 12px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; margin-bottom: 10px; }
+        .btn-calc { background: #27ae60; color: white; }
+        .btn-export { background: #2980b9; color: white; }
+        .status-box { background: #000; padding: 10px; border-radius: 4px; font-size: 11px; margin-top: 10px; border-left: 3px solid #2980b9; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2>Exportação SC_</h2>
+    <input type="file" id="fileFaces" accept=".csv" style="font-size:10px; margin-bottom:10px;">
+    <input type="file" id="fileLogra" accept=".csv" style="font-size:10px; margin-bottom:20px;">
+    
+    <button class="btn btn-calc" onclick="processar()">1. GERAR QUADRAS</button>
+    <button class="btn btn-export" onclick="exportarCSV()">2. EXPORTAR CSV NOMEADO</button>
+
+    <div id="status" class="status-box">Status: Aguardando arquivos...</div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView([-25.659, -53.811], 17);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { opacity: 0.2 }).addTo(map);
+    const camadas = L.featureGroup().addTo(map);
+
+    let dadosExportacao = [];
+    const M_DEG = 111320;
+
+    function parseWKT(wkt) {
+        const m = wkt.match(/\(([^)]+)\)/);
+        return m ? m[1].split(',').map(p => {
+            const c = p.trim().split(/\s+/);
+            return [parseFloat(c[1]), parseFloat(c[0])]; 
+        }) : [];
+    }
+
+    function ordenarNorteOeste(vertices) {
+        let indiceNO = 0;
+        let maxLat = -Infinity;
+        let minLng = Infinity;
+
+        vertices.forEach((v, i) => {
+            if (v[0] > maxLat || (v[0] === maxLat && v[1] < minLng)) {
+                maxLat = v[0];
+                minLng = v[1];
+                indiceNO = i;
+            }
+        });
+
+        const ordenado = [];
+        for (let i = 0; i < vertices.length; i++) {
+            ordenado.push(vertices[(indiceNO + i) % vertices.length]);
+        }
+        return ordenado;
+    }
+
+    async function processar() {
+        const fF = document.getElementById('fileFaces').files[0];
+        const fL = document.getElementById('fileLogra').files[0];
+        if (!fF || !fL) return alert("Por favor, selecione ambos os arquivos CSV.");
+
+        const txtL = await fL.text();
+        const logMap = {};
+        txtL.split('\n').slice(1).forEach(l => {
+            const c = l.split(';');
+            if (c.length >= 5) {
+                const id = c[1]?.trim();
+                if(!logMap[id]) logMap[id] = [];
+                logMap[id].push(...parseWKT(c[4]));
+            }
+        });
+
+        const txtF = await fF.text();
+        const quadras = {};
+        txtF.split('\n').slice(1).forEach(l => {
+            const c = l.split(',');
+            if (c.length < 6) return;
+            const cod = c[0].trim();
+            if (!quadras[cod]) quadras[cod] = [];
+            quadras[cod].push({ face: parseInt(c[1]), dim: parseFloat(c[2]), lat: parseFloat(c[3]), lng: parseFloat(c[4]), idLog: c[5]?.trim() });
+        });
+
+        camadas.clearLayers();
+        dadosExportacao = [];
+
+        Object.keys(quadras).forEach(cod => {
+            const faces = quadras[cod].sort((a,b) => a.face - b.face);
+            const f1 = faces.find(f => f.face === 1);
+            if (!f1) return;
+
+            let vRoxos = [];
+            for (let i = 0; i < faces.length; i++) {
+                const fa = faces[i], fb = faces[(i+1)%faces.length];
+                const ptsA = logMap[fa.idLog] || [], ptsB = logMap[fb.idLog] || [];
+                let best = null, dM = Infinity;
+                ptsA.forEach(p1 => ptsB.forEach(p2 => {
+                    const d = Math.sqrt(Math.pow(p1[0]-p2[0],2)+Math.pow(p1[1]-p2[1],2));
+                    if(d < 0.00015) {
+                        const dC = (Math.sqrt(Math.pow(p1[0]-fa.lat,2)+Math.pow(p1[1]-fa.lng,2)) + Math.sqrt(Math.pow(p1[0]-fb.lat,2)+Math.pow(p1[1]-fb.lng,2)))/2;
+                        if(dC < dM) { dM = dC; best = p1; }
+                    }
+                }));
+                if(best) vRoxos.push(best);
+            }
+
+            if (vRoxos.length >= 2) {
+                const pA = vRoxos[0], pB = vRoxos[1];
+                const cosL = Math.cos(pA[0] * Math.PI / 180);
+                const angCartRad = Math.atan2(pB[0] - pA[0], (pB[1] - pA[1]) * cosL);
+                let azRua = (angCartRad * 180 / Math.PI);
+                let azTeste = 180 - Math.abs(azRua);
+                const angTesteRad = (90 - azTeste) * Math.PI / 180;
+
+                const larg = f1.dim, prof = (faces.find(f => f.face === 2) || f1).dim;
+                const ptsMetros = [{x: -larg/2, y: 0}, {x: larg/2, y: 0}, {x: larg/2, y: -prof}, {x: -larg/2, y: -prof}];
+
+                const vAzul = ptsMetros.map(p => {
+                    const rx = p.x * Math.cos(-angTesteRad) - p.y * Math.sin(-angTesteRad);
+                    const ry = p.x * Math.sin(-angTesteRad) + p.y * Math.cos(-angTesteRad);
+                    return [f1.lat + (ry / M_DEG), f1.lng + (rx / (M_DEG * cosL))];
+                });
+
+                const cReal = [vRoxos.reduce((a,b)=>a+b[0],0)/vRoxos.length, vRoxos.reduce((a,b)=>a+b[1],0)/vRoxos.length];
+                const cTeor = [vAzul.reduce((a,b)=>a+b[0],0)/4, vAzul.reduce((a,b)=>a+b[1],0)/4];
+                const vFinal = vAzul.map(v => [v[0] + (cReal[0] - cTeor[0]), v[1] + (cReal[1] - cTeor[1])]);
+
+                const vOrdenados = ordenarNorteOeste(vFinal);
+                const wktPts = [...vOrdenados, vOrdenados[0]].map(v => `${v[1]} ${v[0]}`).join(', ');
+                const wktPolygon = `POLYGON ((${wktPts}))`;
+                const centroideWKT = `POINT (${cReal[1]} ${cReal[0]})`;
+
+                dadosExportacao.push({
+                    id: cod,
+                    wkt: wktPolygon,
+                    centroide: centroideWKT
+                });
+
+                L.polygon(vFinal, {color: '#3498db', weight: 2}).addTo(camadas);
+            }
+        });
+        document.getElementById('status').innerText = `Processado: ${dadosExportacao.length} quadras.`;
+        if(camadas.getLayers().length > 0) map.fitBounds(camadas.getBounds());
+    }
+
+    function exportarCSV() {
+        if (dadosExportacao.length === 0) return alert("Processe as quadras antes de exportar.");
+        
+        let csvContent = "\ufeffID_QUADRA;WKT_POLYGON;WKT_CENTROID\n";
+        dadosExportacao.forEach(d => {
+            csvContent += `${d.id};"${d.wkt}";"${d.centroide}"\n`;
+        });
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", "SC_Vertices_ajustados.csv");
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        document.getElementById('status').innerText = "Arquivo SC_... baixado!";
+    }
+</script>
+</body>
+</html>

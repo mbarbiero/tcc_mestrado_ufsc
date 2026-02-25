@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>SuperCIATA v24.0 - Visualização Discreta</title>
+    <title>SuperCIATA v25.0 - Filtragem de Vértices OSM</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; padding: 0; display: flex; font-family: "Segoe UI", sans-serif; }
@@ -55,6 +55,13 @@
         return { lng: parseFloat(pts[0]), lat: parseFloat(pts[1]) };
     }
 
+    // Função de distância simples para filtragem
+    function distMetros(p1, p2) {
+        const dx = (p1.lng - p2.lng) * Math.cos(p1.lat * DEG_TO_RAD) * METERS_PER_LAT_DEG;
+        const dy = (p1.lat - p2.lat) * METERS_PER_LAT_DEG;
+        return Math.sqrt(dx*dx + dy*dy);
+    }
+
     document.getElementById('csvFile').addEventListener('change', function(e) {
         if(!e.target.files[0]) return;
         const reader = new FileReader();
@@ -90,7 +97,7 @@
         Object.keys(quadrasMap).forEach(key => {
             const faces = quadrasMap[key];
             
-            // Cálculos Geométricos
+            // Cálculos Geométricos para Translação
             const anc = faces.reduce((prev, curr) => (prev.centroide.lat > curr.centroide.lat) ? prev : curr);
             const cosLat = Math.cos(anc.centroide.lat * DEG_TO_RAD);
             const latConv = 1 / METERS_PER_LAT_DEG;
@@ -131,19 +138,36 @@
                 fillOpacity: 0.15 
             }).addTo(camadaPrincipal);
 
-            // Clique: Pontos Discretos
+            // Clique: Pontos Discretos com Filtragem
             poly.on('click', () => {
                 camadaDebug.clearLayers();
                 addLog(`Inspecionando Quadra ${key}`);
                 
                 faces.forEach(f => {
-                    // Vértices OSM (Vermelho pequeno)
-                    L.circleMarker([f.v1.lat, f.v1.lng], { radius: 2, color: 'red', stroke: false, fillOpacity: 0.8 }).addTo(camadaDebug);
-                    L.circleMarker([f.v2.lat, f.v2.lng], { radius: 2, color: 'red', stroke: false, fillOpacity: 0.8 }).addTo(camadaDebug);
+                    const limiteProx = f.dim * 0.25; // 1/4 da dimensão da face
+
+                    // Desenha V1 e V2 apenas se não forem redundantes
+                    const ptsParaDesenhar = [f.v1, f.v2];
+                    
+                    ptsParaDesenhar.forEach((pt, idx) => {
+                        const outroPt = idx === 0 ? f.v2 : f.v1;
+                        const dist = distMetros(pt, outroPt);
+
+                        // Critério: Desenha se forem o mesmo ponto (coincidentes) 
+                        // OU se estiverem a uma distância segura (> 25% da face)
+                        if (dist === 0 || dist > limiteProx) {
+                            L.circleMarker([pt.lat, pt.lng], { 
+                                radius: 4, // Aumentado conforme solicitado
+                                color: 'red', 
+                                stroke: false, 
+                                fillOpacity: 0.8 
+                            }).addTo(camadaDebug);
+                        }
+                    });
 
                     // Centroide da Face (Verde Discreto)
                     L.circleMarker([f.centroide.lat, f.centroide.lng], { 
-                        radius: 3, 
+                        radius: 5, // Aumentado conforme solicitado
                         color: '#27ae60', 
                         fillColor: '#27ae60', 
                         fillOpacity: 0.9,
@@ -152,7 +176,7 @@
                 });
                 
                 // Centroide Médio (Alvo)
-                L.circleMarker([cOSM[0], cOSM[1]], { radius: 4, color: '#f1c40f', fillOpacity: 0.5 }).addTo(camadaDebug);
+                L.circleMarker([cOSM[0], cOSM[1]], { radius: 6, color: '#f1c40f', fillOpacity: 0.5 }).addTo(camadaDebug);
             });
 
             const coordsWkt = vTrans.map(v => `${v[1]} ${v[0]}`).join(', ');

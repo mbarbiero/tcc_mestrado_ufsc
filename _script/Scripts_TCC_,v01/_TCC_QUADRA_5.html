@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>SuperCIATA v24.0 - Visualização Discreta</title>
+    <title>SuperCIATA v25.0 - Geometria Otimizada</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; padding: 0; display: flex; font-family: "Segoe UI", sans-serif; }
@@ -19,21 +19,21 @@
 <div id="sidebar">
     <h2>1. Entrada de Dados</h2>
     <input type="file" id="csvFile" accept=".csv" style="font-size:10px; width:100%">
-    <button class="btn" onclick="location.reload()">REINICIAR</button>
+    <button class="btn" onclick="location.reload()">LIMPAR MAPA</button>
 
-    <h2>2. Status</h2>
-    <div id="statusLog">Aguardando CSV...</div>
+    <h2>2. Status de Filtragem</h2>
+    <div id="statusLog">Aguardando arquivo...</div>
 
     <h2>3. Exportação</h2>
-    <button class="btn btn-save" onclick="copiarWKT()">COPIAR WKT</button>
+    <button class="btn btn-save" onclick="copiarWKT()">COPIAR WKT (CLIPBOARD)</button>
 </div>
 
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    const map = L.map('map', { maxZoom: 20 }).setView([-25.666, -53.806], 18);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20 }).addTo(map);
+    const map = L.map('map', { maxZoom: 22 }).setView([-25.666, -53.806], 18);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 22 }).addTo(map);
     
     const camadaPrincipal = L.featureGroup().addTo(map);
     const camadaDebug = L.featureGroup().addTo(map);
@@ -46,6 +46,13 @@
         const log = document.getElementById('statusLog');
         log.innerHTML += `> ${msg}<br>`;
         log.scrollTop = log.scrollHeight;
+    }
+
+    // Função de distância euclidiana simples para filtros de proximidade
+    function getDist(p1, p2) {
+        const dx = (p1.lng - p2.lng) * Math.cos(p1.lat * DEG_TO_RAD) * METERS_PER_LAT_DEG;
+        const dy = (p1.lat - p2.lat) * METERS_PER_LAT_DEG;
+        return Math.sqrt(dx*dx + dy*dy);
     }
 
     function parseWKT(wkt) {
@@ -89,9 +96,9 @@
 
         Object.keys(quadrasMap).forEach(key => {
             const faces = quadrasMap[key];
-            
-            // Cálculos Geométricos
             const anc = faces.reduce((prev, curr) => (prev.centroide.lat > curr.centroide.lat) ? prev : curr);
+            
+            // Cálculos de translação e rotação baseados no original
             const cosLat = Math.cos(anc.centroide.lat * DEG_TO_RAD);
             const latConv = 1 / METERS_PER_LAT_DEG;
             const lngConv = 1 / (METERS_PER_LAT_DEG * cosLat);
@@ -125,34 +132,46 @@
 
             const vTrans = vGirada.map(v => [v[0] + (cOSM[0] - cGir[0]), v[1] + (cOSM[1] - cGir[1])]);
             
-            const poly = L.polygon(vTrans, {
-                color: '#2980b9', 
-                weight: 2, 
-                fillOpacity: 0.15 
-            }).addTo(camadaPrincipal);
+            const poly = L.polygon(vTrans, { color: '#2980b9', weight: 2.5, fillOpacity: 0.15 }).addTo(camadaPrincipal);
 
-            // Clique: Pontos Discretos
+            // Clique: Lógica de Filtragem e Exibição de Debug
             poly.on('click', () => {
                 camadaDebug.clearLayers();
-                addLog(`Inspecionando Quadra ${key}`);
+                addLog(`Analisando Quadra ${key}`);
                 
                 faces.forEach(f => {
-                    // Vértices OSM (Vermelho pequeno)
-                    L.circleMarker([f.v1.lat, f.v1.lng], { radius: 2, color: 'red', stroke: false, fillOpacity: 0.8 }).addTo(camadaDebug);
-                    L.circleMarker([f.v2.lat, f.v2.lng], { radius: 2, color: 'red', stroke: false, fillOpacity: 0.8 }).addTo(camadaDebug);
-
-                    // Centroide da Face (Verde Discreto)
+                    const limite = f.dim / 4;
+                    
+                    // 1. Mostrar Centroide da Face (Verde)
                     L.circleMarker([f.centroide.lat, f.centroide.lng], { 
-                        radius: 3, 
-                        color: '#27ae60', 
-                        fillColor: '#27ae60', 
-                        fillOpacity: 0.9,
-                        stroke: false
+                        radius: 5, color: '#27ae60', fillColor: '#27ae60', fillOpacity: 1, stroke: false 
                     }).addTo(camadaDebug);
+
+                    // 2. Processar Vértices OSM (Vermelhos) com filtros
+                    [f.v1, f.v2].forEach((v, idx) => {
+                        const distAoCentroide = getDist(v, f.centroide);
+                        const distEntreVertices = getDist(f.v1, f.v2);
+                        
+                        let descartar = false;
+                        
+                        // Eliminar se muito perto do centroide
+                        if(distAoCentroide < limite) descartar = true;
+                        
+                        // Eliminar se v1 e v2 estão muito próximos (menos de 1/4 da face) e não são coincidentes
+                        if(distEntreVertices > 0 && distEntreVertices < limite) descartar = true;
+
+                        if(!descartar) {
+                            L.circleMarker([v.lat, v.lng], { 
+                                radius: 4, color: 'red', fillColor: 'red', fillOpacity: 0.8, stroke: false 
+                            }).addTo(camadaDebug);
+                        } else {
+                            console.log(`Ponto face ${f.ordem} filtrado por proximidade.`);
+                        }
+                    });
                 });
-                
-                // Centroide Médio (Alvo)
-                L.circleMarker([cOSM[0], cOSM[1]], { radius: 4, color: '#f1c40f', fillOpacity: 0.5 }).addTo(camadaDebug);
+
+                // Centroide Alvo (Amarelo)
+                L.circleMarker([cOSM[0], cOSM[1]], { radius: 6, color: '#f1c40f', fillOpacity: 0.6 }).addTo(camadaDebug);
             });
 
             const coordsWkt = vTrans.map(v => `${v[1]} ${v[0]}`).join(', ');
@@ -160,11 +179,11 @@
         });
         
         map.fitBounds(camadaPrincipal.getBounds());
-        addLog(`Carregado: ${Object.keys(quadrasMap).length} quadras.`);
+        addLog(`Sucesso: ${Object.keys(quadrasMap).length} quadras.`);
     }
 
     function copiarWKT() {
-        if(!wktResults) return alert("Vazio.");
+        if(!wktResults) return alert("Sem dados.");
         navigator.clipboard.writeText(wktResults);
         alert("WKT copiado!");
     }

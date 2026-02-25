@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Validação Final TCC</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; display: flex; font-family: "Segoe UI", sans-serif; background: #1a1a1a; color: white; }
+        #sidebar { width: 420px; height: 100vh; background: #222; padding: 20px; display: flex; flex-direction: column; box-sizing: border-box; border-right: 2px solid #000; }
+        #map { flex-grow: 1; height: 100vh; }
+        
+        .file-box { background: #333; padding: 12px; border-radius: 6px; margin-bottom: 12px; position: relative; }
+        .file-box label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 13px; }
+        .hint { font-size: 10px; color: #f1c40f; margin-top: 5px; display: block; font-style: italic; }
+        
+        .btn { width: 100%; padding: 12px; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; margin-bottom: 8px; }
+        .btn-calc { background: #e67e22; color: white; }
+        .btn-export { background: #2980b9; color: white; }
+
+        .legend-card { background: #111; padding: 15px; border-radius: 6px; margin-bottom: 15px; border-left: 4px solid #f39c12; }
+        .legend-item { display: flex; align-items: center; margin-bottom: 5px; font-size: 12px; }
+        .color-sample { width: 25px; height: 12px; margin-right: 10px; border: 1px solid #fff; }
+
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+        .stat-card { background: #000; padding: 10px; border-radius: 4px; text-align: center; font-size: 12px; border: 1px solid #444; }
+        .stat-card b { display: block; font-size: 16px; color: #f1c40f; }
+
+        .table-area { flex-grow: 1; overflow-y: auto; font-size: 10px; background: #111; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #333; padding: 6px; text-align: left; }
+        th { background: #000; position: sticky; top: 0; color: #aaa; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <div class="legend-card">
+        <div class="legend-item">
+            <div class="color-sample" style="background: rgba(46, 204, 113, 0.1); border: 2px dashed #2ecc71;"></div>
+            <span><b>Verde:</b> SuperCIATA (Calculado)</span>
+        </div>
+        <div class="legend-item">
+            <div class="color-sample" style="background: rgba(52, 152, 219, 0.3); border: 1px solid #3498db;"></div>
+            <span><b>Azul:</b> Geo Oficial (Prefeitura)</span>
+        </div>
+    </div>
+
+    <div class="file-box">
+        <label>Base Oficial (.csv)</label>
+        <input type="file" id="fOficial" style="font-size:10px;">
+        <span class="hint">💡 Use: TCC_Lista_Completa_Quadras.csv</span>
+    </div>
+
+    <div class="file-box">
+        <label>Resultados SuperCIATA (.csv)</label>
+        <input type="file" id="fCalc" style="font-size:10px;">
+        <span class="hint">💡 Use: SC_Vertices_ajustados.csv</span>
+    </div>
+
+    <button class="btn btn-calc" onclick="processar()">ANÁLISE ESPACIAL</button>
+    <button class="btn btn-export" onclick="exportarTudo()">EXPORTAR VÉRTICES (CSV)</button>
+
+    <div class="stats-grid">
+        <div class="stat-card"><label>RMSE GERAL</label><b id="vRmse">-</b></div>
+        <div class="stat-card"><label>MAX ERRO</label><b id="vMax">-</b></div>
+    </div>
+
+    <div class="table-area">
+        <table id="resTabela">
+            <thead>
+                <tr>
+                    <th>ID Quadra</th>
+                    <th>RMSE (m)</th>
+                </tr>
+            </thead>
+            <tbody id="resBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView([-25.659, -53.811], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { opacity: 0.2 }).addTo(map);
+    const camadas = L.featureGroup().addTo(map);
+
+    let dadosCompletos = [];
+    const M_DEG = 111320;
+
+    function parseWKT(wkt) {
+        if (!wkt) return null;
+        let clean = wkt.replace(/"/g, '').trim();
+        let match = clean.match(/\(([^)]+)\)/);
+        if (!match) return null;
+        let s = match[1].replace(/\(/g, '').replace(/\)/g, '');
+        return s.split(',').map((p, i) => {
+            let c = p.trim().split(/\s+/);
+            return { idx: i, lat: parseFloat(c[1]), lng: parseFloat(c[0]) };
+        }).filter(x => !isNaN(x.lat));
+    }
+
+    function distM(p1, p2) {
+        const cosL = Math.cos(p1.lat * Math.PI / 180);
+        const dy = (p1.lat - p2.lat) * M_DEG;
+        const dx = (p1.lng - p2.lng) * M_DEG * cosL;
+        return Math.sqrt(dx*dx + dy*dy);
+    }
+
+    async function processar() {
+        const fOf = document.getElementById('fOficial').files[0];
+        const fCa = document.getElementById('fCalc').files[0];
+        if(!fOf || !fCa) return alert("Por favor, selecione ambos os arquivos.");
+
+        const tOf = await fOf.text();
+        const tCa = await fCa.text();
+
+        const dbOf = {};
+        tOf.split('\n').forEach(l => {
+            const c = l.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+            if(c.length >= 4) {
+                const id = c[2].replace(/"/g, '').trim();
+                dbOf[id] = parseWKT(c[3]);
+            }
+        });
+
+        camadas.clearLayers();
+        dadosCompletos = [];
+        const resBody = document.getElementById('resBody');
+        resBody.innerHTML = "";
+
+        tCa.split('\n').slice(1).forEach(l => {
+            const c = l.split(';');
+            if(c.length >= 2) {
+                const id = c[0].replace(/"/g, '').trim();
+                const gCa = parseWKT(c[1]);
+                if(dbOf[id] && gCa) {
+                    // Cálculo RMSE
+                    let sumSq = 0;
+                    gCa.forEach(vc => {
+                        let minD = Infinity;
+                        dbOf[id].forEach(vo => { let d = distM(vc, vo); if(d < minD) minD = d; });
+                        sumSq += minD ** 2;
+                    });
+                    const rmse = Math.sqrt(sumSq / gCa.length);
+
+                    dadosCompletos.push({ id, rmse, gOf: dbOf[id], gCa: gCa });
+
+                    // Azul: Geo Oficial
+                    L.polygon(dbOf[id], {color: '#3498db', weight: 1, fillOpacity: 0.3}).addTo(camadas);
+                    
+                    // Verde: SuperCIATA (Tracejado)
+                    const p = L.polygon(gCa, {
+                        color: '#2ecc71', weight: 3, dashArray: '8, 8', fillOpacity: 0.05
+                    }).addTo(camadas);
+
+                    p.bindTooltip(`<b>${id}</b><br>RMSE: ${rmse.toFixed(3)}m`, { sticky: true });
+
+                    resBody.innerHTML += `<tr><td>${id}</td><td>${rmse.toFixed(3)}</td></tr>`;
+                }
+            }
+        });
+
+        if(dadosCompletos.length > 0) {
+            const rmses = dadosCompletos.map(d => d.rmse);
+            const totalRMSE = Math.sqrt(rmses.reduce((a,b)=>a+b**2,0)/rmses.length);
+            document.getElementById('vRmse').innerText = totalRMSE.toFixed(3) + "m";
+            document.getElementById('vMax').innerText = Math.max(...rmses).toFixed(3) + "m";
+            map.fitBounds(camadas.getBounds());
+        }
+    }
+
+    function exportarTudo() {
+        if(dadosCompletos.length === 0) return alert("Processe os dados primeiro.");
+        
+        let csv = "ID_QUADRA;TIPO;VERTICE_INDEX;LATITUDE;LONGITUDE;RMSE_LOCAL_QUADRA\n";
+        
+        dadosCompletos.forEach(d => {
+            // Exporta vértices calculados (SuperCIATA)
+            d.gCa.forEach(v => {
+                csv += `${d.id};SUPERCIATA;${v.idx};${v.lat};${v.lng};${d.rmse.toFixed(4)}\n`;
+            });
+            // Exporta vértices oficiais para comparação no mesmo ID
+            d.gOf.forEach(v => {
+                csv += `${d.id};OFICIAL;${v.idx};${v.lat};${v.lng};${d.rmse.toFixed(4)}\n`;
+            });
+        });
+
+        const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "TCC_Detalhado_Vertices_Comparados.csv";
+        link.click();
+    }
+</script>
+</body>
+</html>
