@@ -1,7 +1,7 @@
 const fs = require('fs');
 
 // Configurações de ficheiros
-const fileQuadras = 'C:\\Users\\qto\\OneDrive\\Documentos\\Mestrado\\TCC\\Dados\\Capanema\\TCC_,v01\\TCC_,FACES_GEO20260224001925 - Copia.csv';
+const fileQuadras = 'C:\\Users\\qto\\OneDrive\\Documentos\\Mestrado\\TCC\\Dados\\Capanema\\TCC_,v01\\TCC_,FACES_GEO20260226001127.csv';
 const fileLogradouros = 'C:\\Users\\qto\\OneDrive\\Documentos\\Mestrado\\TCC\\Dados\\Capanema\\TCC_,v01\\OSM_LOGRADOUROS.csv';
 //const fileOutput = 'C:\\Users\\qto\\OneDrive\\Documentos\\Mestrado\\TCC\\Dados\\Capanema\\TCC_,v01\\inserir_pontos_proximos.sql';
 const fileOutputSQL = 'C:\\Users\\qto\\OneDrive\\Documentos\\Mestrado\\TCC\\Dados\\Capanema\\TCC_,v01\\Inserir_Ptos_Prox.sql';

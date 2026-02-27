@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA v65.0 - Padrão PT-BR</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; display: flex; font-family: "Segoe UI", sans-serif; background: #ffffff; color: #000; overflow: hidden; }
+        #sidebar { width: 360px; height: 100vh; background: #fdfdfd; padding: 20px; display: flex; flex-direction: column; border-right: 1px solid #ddd; z-index: 1001; }
+        #map { flex-grow: 1; height: 100vh; background: #fff; }
+        
+        #modalInspetor { 
+            display: none; position: fixed; top: 0; left: 0; 
+            width: 800px; height: 600px; background: #ffffff; 
+            z-index: 2000; box-shadow: 10px 10px 30px rgba(0,0,0,0.1); flex-direction: row;
+        }
+        #modalReport { width: 320px; padding: 25px; background: #ffffff; font-size: 13px; overflow-y: auto; border-right: 1px solid #eee; }
+        #miniMap { flex-grow: 1; height: 100%; background: #f0f0f0; }
+        
+        .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.6); z-index: 1999; }
+        
+        .legend-box { background: #fff; padding: 12px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 20px; border-left: 6px solid #27ae60; }
+        .legend-item { display: flex; align-items: center; margin-bottom: 6px; font-size: 12px; }
+        .color-box { width: 22px; height: 12px; margin-right: 10px; border: 1px solid #000; }
+
+        .file-input-group { background: #f9f9f9; padding: 12px; border: 1px solid #eee; border-radius: 4px; margin-bottom: 12px; }
+        .hint { display: block; font-size: 10px; color: #e67e22; margin-top: 5px; font-weight: bold; }
+        
+        .btn { width: 100%; padding: 12px; border: 1px solid rgba(0,0,0,0.1); cursor: pointer; font-weight: bold; border-radius: 4px; margin-bottom: 8px; color: white; }
+        .btn-calc { background: #27ae60; }
+        .btn-export { background: #2980b9; }
+
+        .error-tag { background: #f8f9fa; padding: 15px; border-radius: 4px; border: 1px solid #27ae60; margin-bottom: 15px; }
+        .area-box { background: #fff; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { border: 1px solid #eee; padding: 8px; text-align: center; }
+        th { background: #f4f4f4; color: #666; font-size: 10px; text-transform: uppercase; }
+        
+        .leaflet-control-zoom { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div class="overlay" id="overlay" onclick="fecharModal()"></div>
+
+<div id="modalInspetor">
+    <div id="modalReport">
+        <h3 id="mTitle" style="color:#27ae60; margin-top:0; font-size: 18px;">Análise Local</h3>
+        <div class="legend-box">
+            <div class="legend-item"><div class="color-box" style="background: rgba(52, 152, 219, 0.4); border-color: #2980b9;"></div><span>Geo Oficial (Ref.)</span></div>
+            <div class="legend-item"><div class="color-box" style="background: transparent; border: 2.5px dashed #27ae60;"></div><span>SuperCIATA (Calc.)</span></div>
+        </div>
+        <div id="reportData"></div>
+    </div>
+    <div id="miniMap"></div>
+</div>
+
+<div id="sidebar">
+    <h2 style="font-size: 20px; border-bottom: 3px solid #27ae60; padding-bottom: 10px;">Validação</h2>
+
+    <div class="legend-box">
+        <div class="legend-item"><div class="color-box" style="background: rgba(52, 152, 219, 0.4); border-color: #2980b9;"></div><span><b>Azul:</b> Base Oficial</span></div>
+        <div class="legend-item"><div class="color-box" style="background: transparent; border: 2.5px dashed #27ae60;"></div><span><b>Verde:</b> SuperCIATA</span></div>
+    </div>
+    
+    <div class="file-input-group">
+        <label style="font-size:12px; font-weight: bold;">Base Oficial:</label>
+        <input type="file" id="fOficial" style="font-size:11px; width:100%; margin-top:5px;">
+    </div>
+
+    <div class="file-input-group">
+        <label style="font-size:12px; font-weight: bold;">SuperCIATA:</label>
+        <input type="file" id="fCalc" style="font-size:11px; width:100%; margin-top:5px;">
+    </div>
+
+    <button class="btn btn-calc" onclick="processar()">PROCESSAR DADOS</button>
+    <button class="btn btn-export" onclick="exportarCSV()">EXPORTAR CSV</button>
+    
+    <div style="flex-grow:1; overflow-y:auto; border:1px solid #eee; border-radius:4px; margin-top:10px;">
+        <table id="mainTable">
+            <thead><tr><th>Quadra ID</th><th>RMSE (m)</th></tr></thead>
+            <tbody id="mainBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map', { zoomControl: false }).setView([-25.659, -53.811], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { opacity: 0.5 }).addTo(map);
+    const camadas = L.featureGroup().addTo(map);
+    let miniMap, miniCamadas, dadosCache = [];
+    const M_DEG = 111320;
+
+    // Função para formatar números no padrão brasileiro (1.234,56)
+    function fNum(n, d = 2) {
+        return n.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
+    }
+
+    function parseWKT(wkt) {
+        if (!wkt) return null;
+        let match = wkt.replace(/"/g, '').match(/\(([^)]+)\)/);
+        if (!match) return null;
+        let s = match[1].replace(/\(/g, '').replace(/\)/g, '');
+        return s.split(',').map(p => {
+            let c = p.trim().split(/\s+/);
+            return { lat: parseFloat(c[1]), lng: parseFloat(c[0]) };
+        }).filter(x => !isNaN(x.lat));
+    }
+
+    function calcularArea(coords) {
+        let area = 0;
+        for (let i = 0; i < coords.length; i++) {
+            let j = (i + 1) % coords.length;
+            let x1 = coords[i].lng * M_DEG * Math.cos(coords[i].lat * Math.PI / 180);
+            let y1 = coords[i].lat * M_DEG;
+            let x2 = coords[j].lng * M_DEG * Math.cos(coords[j].lat * Math.PI / 180);
+            let y2 = coords[j].lat * M_DEG;
+            area += (x1 * y2) - (x2 * y1);
+        }
+        return Math.abs(area) / 2;
+    }
+
+    function distM(p1, p2) {
+        const cosL = Math.cos(p1.lat * Math.PI / 180);
+        return Math.sqrt(Math.pow((p1.lat - p2.lat) * M_DEG, 2) + Math.pow((p1.lng - p2.lng) * M_DEG * cosL, 2));
+    }
+
+    async function processar() {
+        const fOf = document.getElementById('fOficial').files[0];
+        const fCa = document.getElementById('fCalc').files[0];
+        if(!fOf || !fCa) return alert("Selecione os arquivos.");
+
+        const tOf = await fOf.text();
+        const tCa = await fCa.text();
+
+        const dbOf = {};
+        tOf.split('\n').forEach(l => {
+            const c = l.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+            if(c.length >= 4) dbOf[c[2].replace(/"/g, '').trim()] = parseWKT(c[3]);
+        });
+
+        camadas.clearLayers();
+        dadosCache = [];
+        document.getElementById('mainBody').innerHTML = "";
+
+        tCa.split('\n').slice(1).forEach(l => {
+            const c = l.split(';');
+            if(c.length < 2) return;
+            const id = c[0].replace(/"/g, '').trim();
+            const gCa = parseWKT(c[1]);
+
+            if(dbOf[id] && gCa) {
+                let sumSq = 0;
+                let erros = gCa.map(vc => {
+                    let minD = Infinity;
+                    dbOf[id].forEach(vo => { let d = distM(vc, vo); if(d < minD) minD = d; });
+                    sumSq += minD ** 2;
+                    return minD;
+                });
+                const rmse = Math.sqrt(sumSq / gCa.length);
+                const areaOf = calcularArea(dbOf[id]);
+                const areaCa = calcularArea(gCa);
+                
+                dadosCache.push({ id, oficial: dbOf[id], calculada: gCa, erros, rmse, areaOf, areaCa });
+
+                L.polygon(dbOf[id], {color: '#2980b9', weight: 1.5, fillOpacity: 0.2}).addTo(camadas);
+                const p = L.polygon(gCa, {color: '#27ae60', weight: 3, dashArray: '6, 6', fillOpacity: 0.1}).addTo(camadas);
+                
+                p.on('click', () => abrirInspetor(id));
+                document.getElementById('mainBody').innerHTML += `<tr onclick="abrirInspetor('${id}')" style="cursor:pointer;"><td>${id}</td><td><b>${fNum(rmse)}</b></td></tr>`;
+            }
+        });
+        if(dadosCache.length > 0) map.fitBounds(camadas.getBounds());
+    }
+
+    function abrirInspetor(id) {
+        const q = dadosCache.find(x => x.id === id);
+        document.getElementById('modalInspetor').style.display = 'flex';
+        document.getElementById('overlay').style.display = 'block';
+        document.getElementById('mTitle').innerText = `ID: ${id}`;
+
+        if (!miniMap) {
+            miniMap = L.map('miniMap', { zoomControl: false });
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(miniMap);
+            miniCamadas = L.featureGroup().addTo(miniMap);
+        }
+        
+        miniCamadas.clearLayers();
+        L.polygon(q.oficial, {color: '#2980b9', weight: 2, fillOpacity: 0.4}).addTo(miniCamadas);
+        L.polygon(q.calculada, {color: '#27ae60', weight: 4, dashArray: '8, 8', fillOpacity: 0.1}).addTo(miniCamadas);
+        
+        const diffArea = ((Math.abs(q.areaCa - q.areaOf) / q.areaOf) * 100);
+        let rows = q.erros.map((e, i) => `<tr><td>Vértice ${i}</td><td>${fNum(e)} m</td></tr>`).join('');
+
+        document.getElementById('reportData').innerHTML = `
+            <div class="error-tag">
+                <small style="text-transform:uppercase; color:#7f8c8d;">RMSE Posicional</small><br>
+                <b style="font-size:24px;">${fNum(q.rmse)} m</b>
+            </div>
+            <div class="area-box">
+                <div style="font-size:10px;">Oficial:<br><b>${fNum(q.areaOf)} m²</b></div>
+                <div style="font-size:10px;">SuperCIATA:<br><b>${fNum(q.areaCa)} m²</b></div>
+                <div style="grid-column: span 2; border-top: 1px solid #eee; padding-top: 5px;">
+                    Diferença de Área: <b>${fNum(diffArea)}%</b>
+                </div>
+            </div>
+            <table>
+                <thead><tr><th>Vértice</th><th>Desvio (m)</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+        miniMap.fitBounds(miniCamadas.getBounds());
+        setTimeout(() => miniMap.invalidateSize(), 200);
+    }
+
+    function exportarCSV() {
+        if(dadosCache.length === 0) return alert("Processe os dados.");
+        // O CSV de exportação mantém o ponto decimal para compatibilidade com Excel/QGIS
+        let csv = "ID_QUADRA;RMSE;AREA_OFICIAL;AREA_CALC;DIFF_AREA_PERC\n";
+        dadosCache.forEach(d => {
+            const dp = ((Math.abs(d.areaCa - d.areaOf) / d.areaOf) * 100).toFixed(2);
+            csv += `${d.id};${d.rmse.toFixed(2)};${d.areaOf.toFixed(2)};${d.areaCa.toFixed(2)};${dp}\n`;
+        });
+        const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "TCC_Resultados.csv";
+        link.click();
+    }
+
+    function fecharModal() {
+        document.getElementById('modalInspetor').style.display = 'none';
+        document.getElementById('overlay').style.display = 'none';
+    }
+</script>
+</body>
+</html>
