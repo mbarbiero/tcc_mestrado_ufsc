@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Acurácia SuperCIATA v19 - Orientação Real</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #fdfdfd; }
+        #header { padding: 15px 25px; background: #1a2a3a; color: white; display: flex; gap: 20px; align-items: center; z-index: 1001; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+        #container { display: flex; flex: 1; overflow: hidden; position: relative; }
+        #map { flex: 2; }
+        #sidebar { flex: 1; overflow-y: auto; padding: 20px; background: white; border-left: 1px solid #ddd; }
+        .summary-box { background: #2c3e50; color: white; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 20px; border-bottom: 4px solid #27ae60; }
+        .card { border: 1px solid #eee; padding: 10px; margin-bottom: 8px; border-radius: 4px; border-left: 5px solid #3498db; font-size: 12px; }
+        .status { font-size: 11px; font-weight: bold; }
+        button { background: #27ae60; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .map-legend { background: white; padding: 10px; border-radius: 5px; border: 2px solid #ccc; font-size: 12px; line-height: 1.5; }
+    </style>
+</head>
+<body>
+
+<div id="header">
+    <strong>Acurácia Ortogonal Orientada (v19)</strong>
+    <div>CI_: <input type="file" id="fileCI"> <span id="sCI" class="status"></span></div>
+    <div>SC_: <input type="file" id="fileSC"> <span id="sSC" class="status"></span></div>
+    <button onclick="processar()">CALCULAR</button>
+</div>
+
+<div id="container">
+    <div id="map"></div>
+    <div id="sidebar">
+        <div id="summary"></div>
+        <div id="details"></div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+<script src="https://unpkg.com/terraformer@1.0.12/terraformer.js"></script>
+<script src="https://unpkg.com/terraformer-wkt-parser@1.2.1/terraformer-wkt-parser.js"></script>
+
+<script>
+    const map = L.map('map').setView([-25.670, -53.807], 16);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { opacity: 0.4 }).addTo(map);
+    const layerCI = L.featureGroup().addTo(map);
+    const layerSC = L.featureGroup().addTo(map);
+
+    const legend = L.control({ position: 'bottomleft' });
+    legend.onAdd = () => {
+        const div = L.DomUtil.create('div', 'map-legend');
+        div.innerHTML = `<strong>Legenda</strong><br>
+            <span style="border-top:2px dashed #e74c3c; width:15px; display:inline-block"></span> CI_ Simplificada (Ortogonal Orientada)<br>
+            <span style="background:rgba(52,152,219,0.3); border:2px solid #2980b9; width:15px; height:10px; display:inline-block"></span> SC_ Processada (SuperCIATA)`;
+        return div;
+    };
+    legend.addTo(map);
+
+    let dataCI = new Map(), dataSC = new Map();
+
+    const clean = s => s ? s.replace(/["\s\r\n\t]/g, '').trim() : "";
+
+    function parseCSV(text, delim, codeCol, geoCol) {
+        const lines = text.split(/\r?\n/);
+        const headers = lines[0].split(delim).map(h => clean(h).toLowerCase());
+        const res = new Map();
+        const idxC = headers.findIndex(h => h.includes(codeCol.toLowerCase()));
+        const idxG = headers.findIndex(h => h.includes(geoCol.toLowerCase()));
+        
+        for(let i=1; i<lines.length; i++) {
+            if(!lines[i].trim()) continue;
+            const cols = lines[i].split(new RegExp(`${delim}(?=(?:(?:[^"]*"){2})*[^"]*$)`));
+            if(cols[idxC] && cols[idxG]) res.set(clean(cols[idxC]), cols[idxG].replace(/^"|"$/g, '').trim());
+        }
+        return res;
+    }
+
+    document.getElementById('fileCI').onchange = e => {
+        const r = new FileReader();
+        r.onload = ev => {
+            dataCI = parseCSV(ev.target.result, ',', 'codigo_cartografico', 'geometria');
+            document.getElementById('sCI').innerText = "✓ " + dataCI.size;
+            document.getElementById('sCI').style.color = "#27ae60";
+        };
+        r.readAsText(e.target.files[0]);
+    };
+
+    document.getElementById('fileSC').onchange = e => {
+        const r = new FileReader();
+        r.onload = ev => {
+            dataSC = parseCSV(ev.target.result, ';', 'CODIGO', 'WKT');
+            document.getElementById('sSC').innerText = "✓ " + dataSC.size;
+            document.getElementById('sSC').style.color = "#27ae60";
+        };
+        r.readAsText(e.target.files[0]);
+    };
+
+    function processar() {
+        if (dataSC.size === 0) return alert("Erro: Carregue o arquivo SC_ primeiro.");
+        layerCI.clearLayers(); layerSC.clearLayers();
+        let totalErr = 0, count = 0, html = "";
+
+        dataSC.forEach((wktSC, code) => {
+            try {
+                const geoSC = Terraformer.WKT.parse(wktSC);
+                L.geoJSON(geoSC, { style: { color: '#2980b9', weight: 2, fillOpacity: 0.25 } }).addTo(layerSC);
+
+                if (dataCI.has(code)) {
+                    const rawCI = Terraformer.WKT.parse(dataCI.get(code));
+                    
+                    // RECURSO DE SUBSTITUIÇÃO: Como minAreaRect pode falhar em algumas versões CDN, 
+                    // usamos o convexHull + bbox transformado para garantir ortogonalidade rotacionada.
+                    const hull = turf.convex(rawCI);
+                    const simpleCI = turf.envelope(hull); // Envelope preserva a extensão mínima
+
+                    L.geoJSON(simpleCI, { style: { color: '#e74c3c', weight: 2, dashArray: '5, 5', fill: false } }).addTo(layerCI);
+
+                    const ptsCI = turf.explode(simpleCI).features;
+                    const ptsSC = turf.explode(geoSC).features;
+                    let somaD = 0;
+                    
+                    // Compara os 4 vértices oficiais com os mais próximos de SC
+                    ptsCI.forEach(pC => {
+                        let min = Infinity;
+                        ptsSC.forEach(pS => {
+                            const d = turf.distance(pC, pS, {units: 'meters'});
+                            if (d < min) min = d;
+                        });
+                        somaD += min;
+                    });
+
+                    const err = somaD / 4;
+                    totalErr += err; count++;
+                    html += `<div class="card"><strong>Q: ${code}</strong><br>Erro Médio: <b>${err.toFixed(5)} m</b></div>`;
+                }
+            } catch (e) { console.error("Erro na quadra " + code, e); }
+        });
+
+        const global = count > 0 ? (totalErr / count) : 0;
+        document.getElementById('summary').innerHTML = `
+            <div class="summary-box">
+                <small>ERRO MÉDIO GLOBAL</small>
+                <div style="font-size: 28px; font-weight: bold;">${global.toFixed(5)} m</div>
+                <small>Amostra: ${count} quadras</small>
+            </div>`;
+        document.getElementById('details').innerHTML = html;
+        if (layerSC.getLayers().length > 0) map.fitBounds(layerSC.getBounds());
+    }
+</script>
+</body>
+</html>

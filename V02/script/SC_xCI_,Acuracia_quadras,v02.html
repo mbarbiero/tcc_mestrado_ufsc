@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA v46 - Padrão ABNT/Brasil</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #f4f7f6; }
+        #header { padding: 15px 25px; background: #2c3e50; color: white; display: flex; gap: 20px; align-items: center; }
+        .input-box { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+        #container { display: flex; flex: 1; overflow: hidden; }
+        #map { flex: 2; }
+        #sidebar { width: 400px; overflow-y: auto; padding: 20px; background: white; border-left: 1px solid #ddd; }
+        
+        .card-rmse { background: #27ae60; color: white; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 20px; }
+        .rmse-num { font-size: 42px; font-weight: bold; display: block; }
+        
+        .btn-calc { background: #2ecc71; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; margin-bottom: 10px; }
+        .btn-csv { background: #3498db; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; display: none; }
+        
+        table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 15px; }
+        th { background: #ecf0f1; padding: 8px; border: 1px solid #bdc3c7; }
+        td { padding: 8px; border: 1px solid #dee2e6; text-align: center; }
+        .legend { background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.2); font-size: 12px; }
+    </style>
+</head>
+<body>
+
+<div id="header">
+    <strong>SuperCIATA v46</strong>
+    <div class="input-box"><label>BASE OFICIAL (CI_)</label><input type="file" id="f1" accept=".csv"></div>
+    <div class="input-box"><label>BASE AJUSTADA (SC_)</label><input type="file" id="f2" accept=".csv"></div>
+    <button class="btn-calc" onclick="processar()">CALCULAR ACURÁCIA</button>
+</div>
+
+<div id="container">
+    <div id="map"></div>
+    <div id="sidebar">
+        <div id="summary"></div>
+        <button id="btnExport" class="btn-csv" onclick="exportarMemoria()">📥 BAIXAR MEMÓRIA DE VÉRTICES (CSV)</button>
+        <div id="tableContent"></div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+<script src="https://unpkg.com/terraformer@1.0.12/terraformer.js"></script>
+<script src="https://unpkg.com/terraformer-wkt-parser@1.2.1/terraformer-wkt-parser.js"></script>
+
+<script>
+    const map = L.map('map').setView([-25.672, -53.811], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { opacity: 0.4 }).addTo(map);
+    const camadas = { oficial: L.featureGroup().addTo(map), ajustado: L.featureGroup().addTo(map) };
+    
+    let bdOficial = new Map(), bdAjustado = new Map();
+    let logVertices = []; // Para o CSV (Vértice a Vértice)
+    let logQuadras = [];  // Para o Relatório Lateral (Resumo por Quadra)
+
+    const legend = L.control({position: 'bottomright'});
+    legend.onAdd = () => {
+        const div = L.DomUtil.create('div', 'legend');
+        div.innerHTML = '<b style="color:red">--</b> Oficial (CI)<br><b style="color:green">—</b> Ajustado (SC)';
+        return div;
+    };
+    legend.addTo(map);
+
+    // Função para formatar número no padrão BR (vírgula decimal)
+    const formatBR = (num, casas = 4) => num.toFixed(casas).replace('.', ',');
+
+    async function carregar(file) {
+        return new Promise(res => {
+            const r = new FileReader();
+            r.onload = e => {
+                const m = new Map();
+                e.target.result.split(/\r?\n/).forEach((l, i) => {
+                    if (i === 0 || !l.trim()) return;
+                    const c = l.split(';');
+                    if (c.length >= 2) m.set(c[0].replace(/"/g, '').trim(), c[1].replace(/^"|"$/g, '').trim());
+                });
+                res(m);
+            };
+            r.readAsText(file);
+        });
+    }
+
+    document.getElementById('f1').onchange = async e => bdOficial = await carregar(e.target.files[0]);
+    document.getElementById('f2').onchange = async e => bdAjustado = await carregar(e.target.files[0]);
+
+    function processar() {
+        if (!bdOficial.size || !bdAjustado.size) return alert("Selecione os arquivos.");
+        camadas.oficial.clearLayers(); camadas.ajustado.clearLayers();
+        logVertices = []; logQuadras = [];
+        let somaErroQuadTotal = 0, nTotalVertices = 0;
+
+        bdAjustado.forEach((wktA, id) => {
+            if (bdOficial.has(id)) {
+                try {
+                    const fix = (w) => w.toUpperCase().includes("POLYGON ((") ? w : w.replace("POLYGON((", "POLYGON ((");
+                    const gO = Terraformer.WKT.parse(fix(bdOficial.get(id)));
+                    const gA = Terraformer.WKT.parse(fix(wktA));
+
+                    L.geoJSON(gO, {style:{color:'red', weight:1, dashArray:'3'}}).addTo(camadas.oficial);
+                    L.geoJSON(gA, {style:{color:'green', weight:2, fillOpacity:0.1}}).addTo(camadas.ajustado);
+
+                    const vA = turf.explode(gA).features.slice(0, 4);
+                    const vO_all = turf.explode(gO).features;
+
+                    let somaErroQuadQuadra = 0;
+
+                    vA.forEach((ptA, idx) => {
+                        let dMin = Infinity;
+                        let ptO_best = null;
+                        
+                        vO_all.forEach(ptO => {
+                            const d = turf.distance(ptA, ptO, {units:'meters'});
+                            if (d < dMin) { dMin = d; ptO_best = ptO; }
+                        });
+
+                        const errQuad = Math.pow(dMin, 2);
+                        somaErroQuadQuadra += errQuad;
+                        somaErroQuadTotal += errQuad;
+                        nTotalVertices++;
+
+                        // Log detalhado para CSV (Vértice a Vértice)
+                        logVertices.push({
+                            id, 
+                            vertice: 'V' + (idx + 1),
+                            ajust_lon: ptA.geometry.coordinates[0],
+                            ajust_lat: ptA.geometry.coordinates[1],
+                            ofic_lon: ptO_best.geometry.coordinates[0],
+                            ofic_lat: ptO_best.geometry.coordinates[1],
+                            distancia: dMin,
+                            err_quad: errQuad
+                        });
+                    });
+
+                    // Log resumido para Relatório Lateral (Por Quadra)
+                    const rmseQuadra = Math.sqrt(somaErroQuadQuadra / 4);
+                    logQuadras.push({ id, rmse: rmseQuadra });
+
+                } catch(e) { console.error(e); }
+            }
+        });
+
+        const rmseGlobal = Math.sqrt(somaErroQuadTotal / nTotalVertices);
+        exibirResultados(rmseGlobal, logQuadras.length);
+    }
+
+    function exibirResultados(rmse, qtd) {
+        document.getElementById('summary').innerHTML = `
+            <div class="card-rmse">
+                <small>RMSE GLOBAL (BR)</small>
+                <span class="rmse-num">${formatBR(rmse, 3)} m</span>
+                <small>${qtd} quadras processadas</small>
+            </div>`;
+        
+        let html = "<table><tr><th>QUADRA</th><th>RMSE (m)</th></tr>";
+        logQuadras.forEach(q => {
+            html += `<tr><td>${q.id}</td><td><b>${formatBR(q.rmse, 3)}</b></td></tr>`;
+        });
+        document.getElementById('tableContent').innerHTML = html + "</table>";
+        document.getElementById('btnExport').style.display = 'block';
+        map.fitBounds(camadas.ajustado.getBounds());
+    }
+
+    function exportarMemoria() {
+        // Cabeçalho CSV
+        let csv = "ID_QUADRA;VERTICE;LON_AJUSTADO;LAT_AJUSTADO;LON_OFICIAL;LAT_OFICIAL;DISTANCIA_METROS;ERRO_QUADRATICO\n";
+        
+        logVertices.forEach(v => {
+            csv += `${v.id};${v.vertice};${formatBR(v.ajust_lon, 8)};${formatBR(v.ajust_lat, 8)};${formatBR(v.ofic_lon, 8)};${formatBR(v.ofic_lat, 8)};${formatBR(v.distancia, 4)};${formatBR(v.err_quad, 6)}\n`;
+        });
+
+        // Adiciona BOM para o Excel reconhecer UTF-8 e acentos/caracteres
+        const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute("download", "Memoria_Calculo_Vértices_BR.csv");
+        link.click();
+    }
+</script>
+</body>
+</html>
