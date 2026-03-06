@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>TCC - Análise Final Multi-Quadras</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/wellknown@0.5.0/wellknown.min.js"></script>
+    
+    <style>
+        html, body { margin: 0; padding: 0; width: 800px; height: 600px; overflow: hidden; background: #fff; font-family: 'Segoe UI', sans-serif; }
+        #map { width: 800px; height: 600px; z-index: 1; background: #fff; }
+
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 800px; height: 600px;
+            z-index: 2000; background: rgba(255, 255, 255, 0.98);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .panel { padding: 20px; border: 1px solid #ccc; background: #fff; width: 380px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h2 { font-size: 14px; color: #2c5282; margin: 0 0 15px 0; text-align: center; text-transform: uppercase; }
+        label { font-size: 11px; font-weight: bold; color: #555; display: block; margin-top: 10px; }
+        input { font-size: 11px; margin-bottom: 5px; width: 100%; }
+        button { width: 100%; padding: 12px; background: #2c5282; border: none; color: white; cursor: pointer; font-weight: bold; margin-top: 15px; }
+        
+        .hidden { display: none !important; }
+
+        /* Legenda Leaflet - Canto Inferior Esquerdo */
+        .leaflet-custom-legend {
+            background: rgba(255,255,255,0.95);
+            border: 1.5px solid #333;
+            padding: 8px 12px;
+            font-size: 11px;
+            margin-bottom: 25px !important;
+            margin-left: 25px !important;
+        }
+        .leg-item { display: flex; align-items: center; margin: 4px 0; }
+        .line { width: 22px; height: 4px; margin-right: 10px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; margin-right: 10px; border: 1px solid #000; }
+
+        /* Rótulo da Quadra sem Box */
+        .quadra-id-label {
+            background: none !important;
+            border: none !important;
+            box-shadow: none !important;
+            color: #2c5282;
+            font-weight: 800;
+            font-size: 10px;
+            text-shadow: 1px 1px 2px white, -1px -1px 2px white;
+            white-space: nowrap;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div class="panel">
+        <h2>Mapa de Precisão Cadastral</h2>
+        <label>1. Base Oficial (CI_):</label> <input type="file" id="file-ci">
+        <label>2. Base SuperCIATA (SC_):</label> <input type="file" id="file-sc">
+        <label>3. Logradouros OSM:</label> <input type="file" id="file-osm">
+        <button onclick="processData()">EXECUTAR VARREDURA</button>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script>
+    const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([0,0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { opacity: 0.5 }).addTo(map);
+    L.control.scale({ imperial: false, position: 'bottomright' }).addTo(map);
+
+    const TARGET_QUADRAS = ["01.03.002.3.0065", "01.05.004.1.0019"];
+    const TARGET_LOGS = [
+        "02443DBB", "1558A9D1", "F54DE0AF", "2C686C6D", 
+        "3020980C", "5C81EDF2", "E12A8086", "0E9A43FC"
+    ];
+
+    function normalize(val) { return val ? val.toString().replace(/[^a-zA-Z0-9]/g, "").trim() : ""; }
+
+    async function parseCSV(id) {
+        return new Promise(resolve => {
+            const file = document.getElementById(id).files[0];
+            if (!file) { resolve(null); return; }
+            Papa.parse(file, {
+                header: true, delimiter: ";", skipEmptyLines: true,
+                complete: results => resolve(results.data)
+            });
+        });
+    }
+
+    const legendControl = L.control({ position: 'bottomleft' });
+    legendControl.onAdd = function() {
+        const div = L.DomUtil.create('div', 'leaflet-custom-legend');
+        div.innerHTML = `
+            <div style="font-weight: bold; margin-bottom: 5px; border-bottom: 1px solid #000;">LEGENDA</div>
+            <div class="leg-item"><div class="line" style="background: #e53e3e;"></div> Oficial (CI_)</div>
+            <div class="leg-item"><div class="line" style="border-top: 3px dashed #0044cc;"></div> SuperCIATA (SC_)</div>
+            <div class="leg-item"><div class="dot" style="background: #8000ff;"></div> Vértice OSM</div>
+            <div class="leg-item"><div class="dot" style="background: #00ff00;"></div> Interseção</div>
+        `;
+        return div;
+    };
+
+    async function processData() {
+        const ciData = await parseCSV('file-ci');
+        const scData = await parseCSV('file-sc');
+        const osmData = await parseCSV('file-osm');
+
+        const groupTotal = L.featureGroup();
+        const quadraCenters = [];
+        const coordMap = new Map();
+        const normTargets = TARGET_QUADRAS.map(normalize);
+
+        // 1 e 2. Processar Quadras
+        [ciData, scData].forEach((dataset, idx) => {
+            if (!dataset) return;
+            dataset.forEach(row => {
+                const rowIdNorm = normalize(row.CI_ID_QUADRA);
+                if (normTargets.includes(rowIdNorm)) {
+                    const geo = wellknown.parse(row.GEOMETRIA.trim());
+                    if (geo) {
+                        const isOficial = idx === 0;
+                        const style = isOficial 
+                            ? { color: '#e53e3e', weight: 4, fillOpacity: 0.1 } 
+                            : { color: '#0044cc', weight: 4, dashArray: '10, 10', fillOpacity: 0 };
+                        
+                        const l = L.geoJSON(geo, { style: style }).addTo(map);
+                        groupTotal.addLayer(l);
+
+                        if (isOficial) {
+                            const center = l.getBounds().getCenter();
+                            quadraCenters.push(center);
+                            L.marker(center, {
+                                icon: L.divIcon({
+                                    className: 'quadra-id-label',
+                                    html: row.CI_ID_QUADRA,
+                                    iconSize: [120, 20],
+                                    iconAnchor: [60, 10]
+                                })
+                            }).addTo(map);
+                        }
+                    }
+                }
+            });
+        });
+
+        // 3. Logradouros OSM com filtro de proximidade (150m de qualquer quadra)
+        if (osmData && quadraCenters.length > 0) {
+            const normLogTargets = TARGET_LOGS.map(normalize);
+            osmData.forEach(row => {
+                const logId = normalize(row.SC_ID_LOGRADOURO);
+                if (normLogTargets.includes(logId)) {
+                    const wkt = row.WKT || row.GEOMETRIA;
+                    if (wkt) {
+                        const geo = wellknown.parse(wkt.trim());
+                        if (geo) {
+                            const coords = geo.type === "LineString" ? geo.coordinates : (geo.type === "Point" ? [geo.coordinates] : []);
+                            coords.forEach(pt => {
+                                const latLng = L.latLng(pt[1], pt[0]);
+                                // Filtro: Proximidade de qualquer uma das quadras detectadas
+                                const isNear = quadraCenters.some(center => center.distanceTo(latLng) < 180);
+                                
+                                if (isNear) {
+                                    const key = `${pt[0].toFixed(7)},${pt[1].toFixed(7)}`;
+                                    if (!coordMap.has(key)) coordMap.set(key, { pt: pt, logs: new Set() });
+                                    coordMap.get(key).logs.add(logId);
+                                }
+                            });
+                        }
+                    }
+                }
+            });
+
+            coordMap.forEach((data) => {
+                const isCommon = data.logs.size > 1;
+                const m = L.circleMarker([data.pt[1], data.pt[0]], {
+                    radius: isCommon ? 6 : 4,
+                    fillColor: isCommon ? "#00ff00" : "#8000ff",
+                    color: "#000", weight: 1, fillOpacity: 0.9
+                }).addTo(map);
+                groupTotal.addLayer(m);
+            });
+        }
+
+        if (groupTotal.getLayers().length > 0) {
+            map.fitBounds(groupTotal.getBounds().pad(0.3));
+            document.getElementById('ui-layer').classList.add('hidden');
+            legendControl.addTo(map);
+        } else {
+            alert("Nenhum dado encontrado para as quadras especificadas.");
+        }
+    }
+</script>
+</body>
+</html>
