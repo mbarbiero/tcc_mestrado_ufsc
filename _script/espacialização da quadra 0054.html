@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SuperCIATA - Alinhamento de Esquinas</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        #map { height: 500px; width: 100%; background: #fff; border: 1px solid #333; }
+        .label-lote { font-size: 9px; font-weight: bold; }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+
+<script>
+    const map = L.map('map').setView([-27.595, -48.545], 19);
+    const mToDeg = 0.000009; 
+
+    // Dados baseados no seu CSV "0054_3" e nas regras revisadas
+    const dadosLotes = [
+        {"NOM_LOGRADOURO": "AV. PARANA", "NUM_ENDERECO": 665, "DIM_TESTADA": 19.96, "DIM_PROFUNDIDADE": 22.56, "ADJ": "AV. UBIRAJARAS"},
+        {"NOM_LOGRADOURO": "AV. PARANA", "NUM_ENDERECO": 655, "DIM_TESTADA": 19.96, "DIM_PROFUNDIDADE": 45.12, "ADJ": null},
+        {"NOM_LOGRADOURO": "AV. PARANA", "NUM_ENDERECO": 625, "DIM_TESTADA": 19.96, "DIM_PROFUNDIDADE": 45.12, "ADJ": null},
+        {"NOM_LOGRADOURO": "AV. PARANA", "NUM_ENDERECO": 615, "DIM_TESTADA": 9.98, "DIM_PROFUNDIDADE": 45.12, "ADJ": null},
+        {"NOM_LOGRADOURO": "AV. PARANA", "NUM_ENDERECO": 603, "DIM_TESTADA": 9.98, "DIM_PROFUNDIDADE": 45.12, "ADJ": null},
+        {"NOM_LOGRADOURO": "AV. PARANA", "NUM_ENDERECO": 589, "DIM_TESTADA": 19.96, "DIM_PROFUNDIDADE": 30.08, "ADJ": "RUA CARAMURUS"},
+        {"NOM_LOGRADOURO": "RUA CARAMURUS", "NUM_ENDERECO": 461, "DIM_TESTADA": 15.04, "DIM_PROFUNDIDADE": 19.96, "ADJ": null},
+        {"NOM_LOGRADOURO": "RUA CARAMURUS", "NUM_ENDERECO": 447, "DIM_TESTADA": 20.06, "DIM_PROFUNDIDADE": 49.9, "ADJ": null},
+        {"NOM_LOGRADOURO": "RUA CARAMURUS", "NUM_ENDERECO": 427, "DIM_TESTADA": 11.28, "DIM_PROFUNDIDADE": 19.96, "ADJ": null},
+        {"NOM_LOGRADOURO": "RUA CARAMURUS", "NUM_ENDERECO": 415, "DIM_TESTADA": 11.28, "DIM_PROFUNDIDADE": 19.96, "ADJ": null}
+    ];
+
+    let curPos = L.latLng(-27.595, -48.545);
+    let logradouroAtual = "";
+    let faceIndex = -1;
+    let offsetEsquina = 0; // Armazena a profundidade da esquina para alinhar a próxima face
+
+    dadosLotes.forEach((lote, index) => {
+        // Detecção de troca de logradouro (Nova Face)
+        if (lote.NOM_LOGRADOURO !== logradouroAtual) {
+            logradouroAtual = lote.NOM_LOGRADOURO;
+            faceIndex++;
+
+            // Se for a troca para Caramurus, o ponto inicial deve ser recuado 
+            // pela profundidade do lote de esquina anterior (589)
+            if (faceIndex === 1) {
+                const loteAnterior = dadosLotes[index - 1];
+                offsetEsquina = loteAnterior.DIM_PROFUNDIDADE * mToDeg;
+                // Move o cursor para a face adjacente, alinhado com o fundo do lote de esquina
+                curPos = L.latLng(curPos.lat - offsetEsquina, curPos.lng);
+            }
+        }
+
+        let lat1, lon1, lat2, lon2;
+        let testadaDeg = lote.DIM_TESTADA * mToDeg;
+        let profDeg = lote.DIM_PROFUNDIDADE * mToDeg;
+
+        if (faceIndex === 0) { // AV. PARANA (Norte)
+            lat1 = curPos.lat; lon1 = curPos.lng;
+            lat2 = lat1 - profDeg; lon2 = lon1 + testadaDeg;
+            curPos = L.latLng(lat1, lon2); // Próximo lote continua na horizontal
+        } else { // RUA CARAMURUS (Leste)
+            lat1 = curPos.lat; lon1 = curPos.lng;
+            lat2 = lat1 - testadaDeg; lon2 = lon1 - profDeg;
+            curPos = L.latLng(lat2, lon1); // Próximo lote continua na vertical
+        }
+
+        L.rectangle([[lat1, lon1], [lat2, lon2]], {
+            color: "#003380", weight: 1, fillColor: lote.ADJ ? "#ff9800" : "#bbdefb", fillOpacity: 0.5
+        }).addTo(map).bindTooltip(`${lote.NUM_ENDERECO}`);
+    });
+</script>
+</body>
+</html>

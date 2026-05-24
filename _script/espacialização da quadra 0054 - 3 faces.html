@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperCIATA - Alinhamento de Calçada Face Sul</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { height: 100vh; width: 100%; background: #fff; }
+        .label-lote { font-size: 9px; font-weight: bold; color: #000; pointer-events: none; }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+
+<script>
+    const map = L.map('map').setView([-27.595, -48.545], 19);
+    const mToDeg = 0.000009; 
+
+    const dadosLotes = [
+        {"LOG": "AV. PARANA", "NUM": 665, "T": 19.96, "P": 22.56},
+        {"LOG": "AV. PARANA", "NUM": 655, "T": 19.96, "P": 45.12},
+        {"LOG": "AV. PARANA", "NUM": 625, "T": 19.96, "P": 45.12},
+        {"LOG": "AV. PARANA", "NUM": 615, "T": 9.98, "P": 45.12},
+        {"LOG": "AV. PARANA", "NUM": 603, "T": 9.98, "P": 45.12},
+        {"LOG": "AV. PARANA", "NUM": 589, "T": 19.96, "P": 30.08},
+        
+        {"LOG": "RUA CARAMURUS", "NUM": 461, "T": 15.04, "P": 19.96},
+        {"LOG": "RUA CARAMURUS", "NUM": 447, "T": 20.06, "P": 49.9},
+        {"LOG": "RUA CARAMURUS", "NUM": 427, "T": 11.28, "P": 19.96},
+        {"LOG": "RUA CARAMURUS", "NUM": 415, "T": 11.28, "P": 19.96},
+
+        {"LOG": "RUA SANTA CATARINA", "NUM": 3590, "T": 19.96, "P": 22.56},
+        {"LOG": "RUA SANTA CATARINA", "NUM": 3612, "T": 19.96, "P": 45.12},
+        {"LOG": "RUA SANTA CATARINA", "NUM": 3632, "T": 19.96, "P": 45.12},
+        {"LOG": "RUA SANTA CATARINA", "NUM": 3646, "T": 9.98, "P": 36.79},
+        {"LOG": "RUA SANTA CATARINA", "NUM": 3650, "T": 9.98, "P": 45.12}
+    ];
+
+    let curPos = L.latLng(-27.595, -48.545);
+    let logAtual = "";
+    let faceIdx = -1;
+
+    dadosLotes.forEach((lote, index) => {
+        if (lote.LOG !== logAtual) {
+            logAtual = lote.LOG;
+            faceIdx++;
+
+            if (faceIdx === 1) {
+                let loteAnterior = dadosLotes[index - 1];
+                curPos = L.latLng(curPos.lat - (loteAnterior.P * mToDeg), curPos.lng);
+            }
+        }
+
+        let lat1, lon1, lat2, lon2;
+        let t = lote.T * mToDeg;
+        let p = lote.P * mToDeg;
+
+        if (faceIdx === 0) { // NORTE
+            lat1 = curPos.lat; lon1 = curPos.lng;
+            lat2 = lat1 - p; lon2 = lon1 + t;
+            curPos = L.latLng(lat1, lon2);
+        } 
+        else if (faceIdx === 1) { // LESTE
+            lat1 = curPos.lat; lon1 = curPos.lng;
+            lat2 = lat1 - t; lon2 = lon1 - p;
+            curPos = L.latLng(lat2, lon1);
+        }
+        else if (lote.NUM === 3590) { // LOTE DE TRANSIÇÃO
+            lat1 = curPos.lat; lon1 = curPos.lng;
+            lat2 = lat1 - p; // Estende verticalmente (Face do logradouro Sul)
+            lon2 = lon1 - t; // Testada horizontal
+            
+            // O PRÓXIMO ponto deve ser na latitude da calçada (lat2)
+            curPos = L.latLng(lat2, lon1 - t); 
+        }
+        else if (faceIdx === 2) { // FACE SUL ALINHADA PELA CALÇADA
+            lat1 = curPos.lat; 
+            lon1 = curPos.lng;
+            lat2 = lat1 + p; // Profundidade "sobe" para o Norte (miolo da quadra)
+            lon2 = lon1 - t; // Testada continua para o Oeste
+            curPos = L.latLng(lat1, lon2);
+        }
+
+        L.rectangle([[lat1, lon1], [lat2, lon2]], {
+            color: "#333", weight: 1, 
+            fillColor: faceIdx === 0 ? "#bbdefb" : faceIdx === 1 ? "#c8e6c9" : "#fff9c4",
+            fillOpacity: 0.7
+        }).addTo(map).bindTooltip(`${lote.NUM}`, {permanent: true, direction: 'center', className: 'label-lote'});
+    });
+</script>
+</body>
+</html>
