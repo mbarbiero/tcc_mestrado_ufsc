@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SuperCIATA LATAM - Espacialización de Manzanas</title>
+
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/latam.css">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1;
+            background-color: #f0fdf4;
+        }
+
+        .app-header {
+            position: relative;
+            z-index: 1000;
+            background-color: #ffffff !important;
+            border-bottom: 1px solid #dcfce7;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0, 68, 27, 0.05);
+        }
+
+        /* Painel de Controle posicionado rigidamente à IZQUIERDA */
+        .sidebar-controls {
+            position: absolute;
+            top: 80px;
+            left: 20px;
+            z-index: 1000;
+            width: 320px;
+            max-height: calc(100% - 120px);
+            overflow-y: auto;
+        }
+
+        /* Container en armonía visual verdosa */
+        .control-box {
+            background: #ffffff;
+            border-radius: 6px;
+            border: 1px solid #bbf7d0;
+            padding: 15px;
+            box-shadow: 0 4px 10px rgba(0, 68, 27, 0.08);
+        }
+
+        .btn-action {
+            width: 100%;
+            padding: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            background-color: #065f46;
+            color: white;
+        }
+
+        .btn-action:hover {
+            background-color: #047857;
+        }
+
+        .btn-action:disabled {
+            background-color: #e2e8f0 !important;
+            color: #94a3b8 !important;
+            cursor: not-allowed;
+        }
+
+        /* Terminal con fondo verde oscuro digital */
+        #terminal {
+            background: #064e3b;
+            color: #34d399;
+            font-family: monospace;
+            padding: 12px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-size: 12px;
+            white-space: pre-wrap;
+            border: 1px solid #047857;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .info-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #16a34a;
+            font-weight: bold;
+            margin: 0;
+        }
+
+        .info-value {
+            font-size: 15px;
+            color: #14532d;
+            font-weight: bold;
+            margin: 2px 0 10px 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header class="app-header">
+        <div>
+            <h1 style="margin:0; font-size: 18px;">SuperCIATA LATAM</h1>
+            <small style="color: #16a34a;">Fase 4: Cálculo Topológico de Manzanas</small>
+        </div>
+        <a href="mapa.html" class="btn-back">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+            Volver al Mapa Central
+        </a>
+    </header>
+
+    <div id="map"></div>
+
+    <div class="sidebar-controls">
+        <div class="control-box">
+
+            <p class="info-label">📍 Municipio / País</p>
+            <div id="lbl-municipio-pais" class="info-value">Cargando...</div>
+
+            <hr style="border: 0; border-top: 1px solid #dcfce7; margin: 12px 0;">
+
+            <button id="btn-processar" class="btn-action">
+                📐 Espacializar Manzanas
+            </button>
+
+            <div id="terminal">Esperando comandos del operador...</div>
+        </div>
+    </div>
+
+    <script>
+        // Recupera el contexto operacional del LocalStorage
+        const contexto = JSON.parse(localStorage.getItem('sc_latam_contexto'));
+        if (!contexto) {
+            alert('Contexto territorial no encontrado. Regrese al mapa central.');
+            window.location.href = 'index.html';
+        }
+
+        const lblMunicipioPais = document.getElementById('lbl-municipio-pais');
+        if (contexto.nome_municipio) {
+            lblMunicipioPais.textContent = `${contexto.nome_municipio} (${contexto.nome_pais || 'Brasil'})`;
+        }
+
+        // ====================================================================
+        // CONFIGURACIÓN DE LAS CAPAS DEL MAPA (BASE LAYERS)
+        // ====================================================================
+        const camadaOSM = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        });
+
+        const camadaRelevo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenTopoMap contributors'
+        });
+
+        const camadaSatelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+        });
+
+        // Inicializa el mapa enfocando el centroide guardado
+        const map = L.map('map', {
+            zoomControl: true,
+            layers: [camadaOSM]
+        }).setView([contexto.latitude || -15.7801, contexto.longitude || -47.9292], 14);
+
+        const mapasBase = {
+            "Mapa Urbano (OSM)": camadaOSM,
+            "Mapa de Relevo": camadaRelevo,
+            "Imagen de Satélite": camadaSatelite
+        };
+
+        // Agrega el control de capas en la esquina superior DERECHA
+        L.control.layers(mapasBase, null, { position: 'topright' }).addTo(map);
+
+        // Agrega un marcador en el centroide municipal
+        if (contexto.latitude && contexto.longitude) {
+            L.marker([contexto.latitude, contexto.longitude]).addTo(map)
+                .bindPopup(`<b>${contexto.nome_municipio}</b><br>Punto Central de Referencia.`);
+        }
+
+        // ====================================================================
+        // PROCESAMIENTO GEOMÉTRICO Y TERMINAL
+        // ====================================================================
+        const terminal = document.getElementById('terminal');
+        const btnProcessar = document.getElementById('btn-processar');
+
+        function log(texto, cor = "#34d399") {
+            const linha = document.createElement('div');
+            linha.style.color = cor;
+            linha.style.marginBottom = "4px";
+            linha.innerHTML = `[${new Date().toLocaleTimeString()}] ${texto}`;
+            terminal.appendChild(linha);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        btnProcessar.addEventListener('click', async () => {
+            btnProcessar.disabled = true;
+            terminal.innerHTML = '';
+            log('🔄 Buscando lista de manzanas alfanuméricas en la base...', '#ffffff');
+
+            try {
+                // 1. Busca las manzanas registradas en la tabla SC_QUADRAS
+                const resQuadras = await fetch(`${contexto.api_base}/sc_/listar-quadras`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ osmIdMunicipio: contexto.osm_id_municipio })
+                });
+
+                const jsonQuadras = await resQuadras.json();
+
+                if (!jsonQuadras.sucesso || jsonQuadras.dados.length === 0) {
+                    throw new Error('No se encontraron manzanas para procesamiento alfanumérico.');
+                }
+
+                const listaQuadras = jsonQuadras.dados;
+                log(`📦 ${listaQuadras.length} manzanas listas para análisis espacial.`, '#34d399');
+
+                // 2. Loop para procesar cada manzana individualmente
+                for (const quadra of listaQuadras) {
+                    const { CI_ID_QUADRA, SC_ID_QUADRA } = quadra;
+                    const logradourosArray = SC_ID_QUADRA.split(',');
+
+                    if (logradourosArray.length !== 4) continue; // Filtro de teste
+
+                    log(`⚙️ Servidor procesando topología de Manzana: ${CI_ID_QUADRA}`, '#ffffff');
+
+                    // Dispara uma única chamada que calcula, filtra, ordena e salva no banco
+                    const respostaServidor = await fetch(`${contexto.api_base}/sc_/processar-geometria-quadra`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            osmIdMunicipio: contexto.osm_id_municipio,
+                            ciIdQuadra: CI_ID_QUADRA,
+                            logradouros: logradourosArray,
+                            centroReferencia: [contexto.latitude, contexto.longitude]
+                        })
+                    });
+
+                    const resultado = await respostaServidor.json();
+
+                    if (resultado.success && resultado.coordenadasLeaflet) {
+                        // O front-end apenas recebe o polígono pronto e plota no mapa
+                        const poligonoLeaflet = L.polygon(resultado.coordenadasLeaflet, {
+                            color: '#10b981',
+                            fillColor: '#34d399',
+                            fillOpacity: 0.3,
+                            weight: 2
+                        }).addTo(map);
+
+                        poligonoLeaflet.bindPopup(`<b>Manzana:</b> ${CI_ID_QUADRA}`);
+                        map.panTo(resultado.coordenadasLeaflet[0]);
+
+                        log(`✅ Manzana ${CI_ID_QUADRA} espacializada y guardada por el servidor.`, '#34d399');
+                    } else {
+                        log(`❌ Omitida: ${resultado.error || 'Error desconocido'}`, '#ef4444');
+                    }
+                }
+                log('🎯 ¡Proceso de espacialización masiva finalizado!', '#34d399');
+
+            } catch (err) {
+                log(`❌ Error en el procesamiento: ${err.message}`, '#ef4444');
+            } finally {
+                btnProcessar.disabled = false;
+            }
+        });
+
+        function calcularCentroide(pts) {
+            let lat = 0, lng = 0;
+            pts.forEach(p => { lat += p[0]; lng += p[1]; });
+            return [lat / pts.length, lng / pts.length];
+        }
+
+        function removerVerticesDuplicados(pts) {
+            const limpo = [];
+            pts.forEach(p => {
+                const existe = limpo.some(l => Math.abs(l[0] - p[0]) < 0.00001 && Math.abs(l[1] - p[1]) < 0.00001);
+                if (!existe) limpo.push(p);
+            });
+            return limpo;
+        }
+
+        function gerarWktPolygon(pts) {
+            const listaCopiar = [...pts, pts[0]];
+            const strPontos = listaCopiar.map(p => `${p[1]} ${p[0]}`).join(', ');
+            return `POLYGON((${strPontos}))`;
+        }
+    </script>
+</body>
+
+</html>
